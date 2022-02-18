@@ -611,6 +611,7 @@ in {
   packagekit = handleTest ./packagekit.nix {};
   pam-file-contents = handleTest ./pam/pam-file-contents.nix {};
   pam-oath-login = handleTest ./pam/pam-oath-login.nix {};
+  pam-pwquality = handleTest ./pam/pam-pwquality.nix {};
   pam-u2f = handleTest ./pam/pam-u2f.nix {};
   pam-ussh = handleTest ./pam/pam-ussh.nix {};
   pam-zfs-key = handleTest ./pam/zfs-key.nix {};
