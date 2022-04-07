@@ -1,4 +1,4 @@
-{ lib, buildGoModule, fetchFromGitHub, installShellFiles }:
+{ lib, buildGoModule, fetchFromGitHub, installShellFiles, stdenv }:
 
 buildGoModule rec {
   pname = "stripe-cli";
@@ -23,6 +23,13 @@ buildGoModule rec {
   preCheck = ''
     # the tests expect the Version ldflag not to be set
     unset ldflags
+  '' + lib.optionalString (
+      # delete plugin tests on all platforms but matches
+      ! lib.lists.any
+        (platform: lib.meta.platformMatch stdenv.targetPlatform platform)
+        [ "x86_64-linux" "x86_64-darwin" ]
+  ) ''
+    rm pkg/plugins/plugin_test.go
   '';
 
   postInstall = ''
