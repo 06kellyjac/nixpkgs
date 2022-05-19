@@ -1,5 +1,6 @@
 { lib
-, stdenv
+, mkYarnPackage
+, runCommand
 , fetchFromGitHub
 , fetchYarnDeps
 , writeText
@@ -19,7 +20,7 @@ let
   configOverrides = writeText "element-config-overrides.json" (builtins.toJSON (noPhoningHome // conf));
 
 in
-stdenv.mkDerivation rec {
+mkYarnPackage rec {
   pname = "element-web";
   inherit (pinData) version;
 
@@ -31,31 +32,22 @@ stdenv.mkDerivation rec {
   };
 
   packageJSON = ./element-web-package.json;
+  # Remove the matrix-analytics-events dependency from the matrix-react-sdk
+  # dependencies list. It doesn't seem to be necessary since we already are
+  # installing it individually, and it causes issues with the offline mode.
+  yarnLock = (runCommand "${pname}-modified-lock" {} ''
+    sed '/matrix-analytics-events "github/d' ${src}/yarn.lock > "$out"
+  '');
   offlineCache = fetchYarnDeps {
-    yarnLock = src + "/yarn.lock";
+    inherit yarnLock;
     sha256 = pinData.webYarnHash;
   };
 
-  nativeBuildInputs = [ yarn fixup_yarn_lock jq nodejs ];
-
-  postPatch = ''
-    # Remove the matrix-analytics-events dependency from the matrix-react-sdk
-    # dependencies list. It doesn't seem to be necessary since we already are
-    # installing it individually, and it causes issues with the offline mode.
-    sed -i '/matrix-analytics-events "github/d' yarn.lock
-  '';
+  nativeBuildInputs = [ jq ];
 
   configurePhase = ''
     runHook preConfigure
-
-    export HOME=$PWD/tmp
-    mkdir -p $HOME
-
-    fixup_yarn_lock yarn.lock
-    yarn config --offline set yarn-offline-mirror $offlineCache
-    yarn install --offline --frozen-lockfile --ignore-platform --ignore-scripts --no-progress --non-interactive
-    patchShebangs node_modules
-
+    ln -s $node_modules node_modules
     runHook postConfigure
   '';
 
@@ -74,9 +66,15 @@ stdenv.mkDerivation rec {
 
     cp -R webapp $out
     echo "${version}" > "$out/version"
-    ${jq}/bin/jq -s '.[0] * .[1]' "config.sample.json" "${configOverrides}" > "$out/config.json"
+    jq -s '.[0] * .[1]' "config.sample.json" "${configOverrides}" > "$out/config.json"
 
     runHook postInstall
+  '';
+
+  # Do not attempt generating a tarball for element-web again.
+  # note: `doDist = false;` does not work.
+  distPhase = ''
+    true
   '';
 
   meta = {
