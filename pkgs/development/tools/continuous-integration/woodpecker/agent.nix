@@ -4,26 +4,20 @@ let
     meta
     version
     src
+    ldflags
+    postBuild
     ;
 in
 buildGoModule {
   pname = "woodpecker-agent";
-  inherit version src;
+  inherit version src ldflags postBuild;
   vendorSha256 = null;
 
   subPackages = "cmd/agent";
 
-  CGO_ENABLED = false;
-
-  ldflags = [
-    "-s"
-    "-w"
-    ''-extldflags "-static"''
-    "-X github.com/woodpecker-ci/woodpecker/version.Version=${version}"
-  ];
+  CGO_ENABLED = 0;
 
   meta = meta // {
     description = "Woodpecker Continuous Integration agent";
-    mainProgram = "agent";
   };
 }

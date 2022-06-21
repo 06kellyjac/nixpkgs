@@ -9,6 +9,21 @@ rec {
     sha256 = "sha256-HOOH3H2SXLcT2oW/xL80TO+ZSI+Haulnznpb4hlCQow=";
   };
 
+  postBuild = ''
+    cd $GOPATH/bin
+    for f in *; do
+      mv -- "$f" "woodpecker-$f"
+    done
+    cd -
+  '';
+
+  ldflags = [
+    "-s"
+    "-w"
+    # ''-extldflags "-static"''
+    "-X github.com/woodpecker-ci/woodpecker/version.Version=${version}"
+  ];
+
   meta = with lib; {
     homepage = "https://woodpecker-ci.org/";
     license = licenses.asl20;

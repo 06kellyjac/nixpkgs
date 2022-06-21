@@ -1,59 +1,44 @@
-{ lib, buildGoModule, fetchFromGitHub, mkYarnPackage, glibc }:
+{ lib, buildGoModule, fetchFromGitHub, mkYarnPackage, woodpecker-frontend }:
 let
   inherit (import ./common.nix { inherit lib fetchFromGitHub; })
     meta
     version
     src
+    ldflags
+    postBuild
     ;
-
-  frontend = mkYarnPackage {
-    pname = "woodpecker-frontend";
-    inherit version;
-
-    src = "${src}/web";
-
-    packageJSON = "${src}/web/package.json";
-    yarnLock = "${src}/web/yarn.lock";
-
-    buildPhase = ''
-      yarn build
-    '';
-
-    distPhase = "true";
-  };
 in
 buildGoModule {
   pname = "woodpecker-server";
-  inherit version src;
+  inherit version src ldflags postBuild;
   vendorSha256 = null;
+
+  postPatch = ''
+    cp -r ${woodpecker-frontend} web/dist
+  '';
 
   subPackages = "cmd/server";
 
-  buildInputs = [
-    glibc.static
-  ];
+  CGO_ENABLED = 1;
 
-  CGO_ENABLED = true;
+  # buildInputs = [
+  #   glibc.static
+  # ];
 
-  # FIXME: what about stdenv.hostPlatform.isMusl
-  cflags = [
-    "-I${lib.getDev glibc}/include"
-  ];
+  # # FIXME: what about stdenv.hostPlatform.isMusl
+  # cflags = [
+  #   "-I${lib.getDev glibc}/include"
+  # ];
 
-  ldflags = [
-    "-s"
-    "-w"
-    ''-extldflags "-static"''
-    "-X github.com/woodpecker-ci/woodpecker/version.Version=${version}"
-    "-L ${lib.getLib glibc}/lib"
-  ];
-
-  postPatch = ''
-    cp -r ${frontend}/libexec/woodpecker-ci/deps/woodpecker-ci/dist web/dist
-  '';
+  # ldflags = [
+  #   "-s"
+  #   "-w"
+  #   ''-extldflags "-static"''
+  #   "-X github.com/woodpecker-ci/woodpecker/version.Version=${version}"
+  #   "-L ${lib.getLib glibc}/lib"
+  # ];
 
   meta = meta // {
     description = "Woodpecker Continuous Integration server";
-    mainProgram = "server";
   };
 }
