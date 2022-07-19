@@ -41,11 +41,11 @@ rustPlatform.buildRustPackage rec {
   cargoSha256 = "sha256-l5Ce/ypYXZKEi859OFskwC/Unpo842ZPxIHvp6lCjQc=";
 
   patches = [
-    # remove after https://github.com/denoland/deno/pull/15193 is in a release
+    # remove after https://github.com/denoland/deno/pull/15208 is in a release
     (fetchpatch {
       name = "byo-tcc.patch";
-      url = "https://github.com/denoland/deno/pull/15193/commits/c43698b2b58af1ef69b1558d55c8ebea0268dfea.patch";
-      sha256 = "sha256-YE5mGHyEm20FjFhr8yveBRlrOVL3+qQYxz2xp/IfmJs=";
+      url = "https://github.com/denoland/deno/pull/15208/commits/a8276a7d077db297147f7bd7fbd59fc1244d8de8.patch";
+      sha256 = "sha256-SeNc6fjG+o/nGiP/x4eyBCf8EUcOdAzmT7GynBjg4Qk=";
     })
   ];
 
@@ -53,6 +53,8 @@ rustPlatform.buildRustPackage rec {
     # upstream uses lld on aarch64-darwin for faster builds
     # within nix lld looks for CoreFoundation rather than CoreFoundation.tbd and fails
     substituteInPlace .cargo/config.toml --replace '"-C", "link-arg=-fuse-ld=lld"' ""
+
+    echo "fn main() {}" > ext/ffi/build.rs
   '';
 
   nativeBuildInputs = [ installShellFiles ];
@@ -68,7 +70,7 @@ rustPlatform.buildRustPackage rec {
   # The deno_ffi package currently needs libtcc.a on linux and macos and will try to compile it at build time
   # To avoid this we point it to our copy (dir)
   # In the future tinycc will be replaced with asm
-  DENO_FFI_LIBTCC = "${libtcc}/lib";
+  # DENO_FFI_LIBTCC = "${libtcc}/lib";
 
   # Tests have some inconsistencies between runs with output integration tests
   # Skipping until resolved
