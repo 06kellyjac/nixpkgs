@@ -1296,6 +1296,7 @@
   ./virtualisation/appvm.nix
   ./virtualisation/build-vm.nix
   ./virtualisation/container-config.nix
+  ./virtualisation/containerd-rootless.nix
   ./virtualisation/containerd.nix
   ./virtualisation/containers.nix
   ./virtualisation/nixos-containers.nix
