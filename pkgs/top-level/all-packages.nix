@@ -8702,6 +8702,7 @@ with pkgs;
   ncrack = callPackage ../tools/security/ncrack { };
 
   nerdctl = callPackage ../applications/networking/cluster/nerdctl { };
+  containerd-rootless = callPackage ../applications/networking/cluster/nerdctl/containerd-rootless.nix { };
 
   netdata = callPackage ../tools/system/netdata {
     inherit (darwin.apple_sdk.frameworks) CoreFoundation IOKit;
