@@ -42,7 +42,7 @@ buildGoModule rec {
     runHook postInstall
   '';
 
-  passthru.tests = { inherit (nixosTests) docker containerd; };
+  passthru.tests = { inherit (nixosTests) docker containerd containerd-rootless; };
 
   meta = with lib; {
     homepage = "https://containerd.io/";
