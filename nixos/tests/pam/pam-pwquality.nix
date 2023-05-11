@@ -1,7 +1,7 @@
 import ../make-test-python.nix ({ ... }: {
   name = "pam-pwquality";
 
-  machine =
+  nodes.machine =
     { ... }:
     {
       security.pam.pwquality = {
@@ -60,7 +60,8 @@ import ../make-test-python.nix ({ ... }: {
 
     machine.wait_for_unit("multi-user.target")
 
-    print(f"pwquality.conf:\n{machine.succeed("cat /etc/security/pwquality.conf")}\n")
+    # print(f"pwquality.conf:\n{machine.succeed("cat /etc/security/pwquality.conf")}\n")
+    print(machine.succeed("cat /etc/security/pwquality.conf"))
 
 
     with subtest("/etc/pam.d is configured as expected"):
