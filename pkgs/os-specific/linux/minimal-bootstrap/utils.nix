@@ -63,7 +63,7 @@ rec {
       inherit destination;
     };
 
-  writeText = name: text: writeTextFile {inherit name text;};
+  writeText = name: text: writeTextFile { inherit name text; };
 
   runCommand = name: env: buildCommand:
     derivationWithMeta ({
@@ -74,7 +74,7 @@ rec {
         "--verbose"
         "--strict"
         "--file"
-        (writeText "${name}-builder" buildCommand)
+        (writeText "${name}-builder.kaem" buildCommand)
       ];
 
       PATH = lib.makeBinPath ((env.nativeBuildInputs or []) ++ [ kaem mescc-tools mescc-tools-extra ]);
