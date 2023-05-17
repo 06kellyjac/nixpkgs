@@ -3,6 +3,7 @@
 , fetchurl
 , tinycc
 , gnumake
+, live-bootstrap-files
 }:
 let
   pname = "gnutar";
@@ -15,18 +16,16 @@ let
 
   # Thanks to the live-bootstrap project!
   # See https://github.com/fosslinux/live-bootstrap/blob/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/tar-1.12/tar-1.12.kaem
-  liveBootstrap = "https://github.com/fosslinux/live-bootstrap/raw/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/tar-1.12";
-
-  makefile = fetchurl {
-    url = "${liveBootstrap}/mk/main.mk";
-    sha256 = "0iqidqns4j452pcsh9zr3pbgr2y128xxrl1fz7v1rj7d5zhij1h4";
+  liveBootstrap = live-bootstrap-files.packageFiles {
+    pname = "tar";
+    inherit version;
+    parent = "sysa";
   };
+
+  makefile = liveBootstrap."mk/main.mk";
 
   # stub getdate() that always returns 0
-  getdate_stub_c = fetchurl {
-    url = "${liveBootstrap}/files/getdate_stub.c";
-    sha256 = "0i0j6ymksqf6ip82yqw7j4qwzyc580j2d7wsdf41p8nvg9dmaw4n";
-  };
+  getdate_stub_c = liveBootstrap."files/getdate_stub.c";
 
   # stat is deliberately hacked to be lstat.
   # In src/system.h tar already defines lstat to be stat
@@ -35,10 +34,7 @@ let
   # to have separate stat and lstat functions.
   # Thus here we break tar with --dereference option but we don't use
   # this option in live-bootstrap.
-  stat_override_c = fetchurl {
-    url = "${liveBootstrap}/files/stat_override.c";
-    sha256 = "1ald02j1c15nhs865bwl17lqcy45mrr8n5j0bhhnxkah1bnhimrz";
-  };
+  stat_override_c = liveBootstrap."files/stat_override.c";
 in
 runCommand "${pname}-${version}" {
   inherit pname version;

@@ -8,6 +8,7 @@
 , coreutils
 , bash
 , heirloom-devtools
+, live-bootstrap-files
 , bootstrap ? false
 , flex ? null
 }:
@@ -23,30 +24,22 @@ let
 
   # Thanks to the live-bootstrap project!
   # See https://github.com/fosslinux/live-bootstrap/blob/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/flex-2.5.11
-  liveBootstrap = "https://github.com/fosslinux/live-bootstrap/raw/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/flex-2.5.11";
-
-  makefile = fetchurl {
-    url = "${liveBootstrap}/mk/main.mk";
-    sha256 = "0nghqg6yibxwiiylcqsjyv0bdpdi8nfcf6k5hbbcq7054fcha3b4";
+  liveBootstrap = live-bootstrap-files.packageFiles {
+    pname = "flex";
+    inherit version;
+    parent = "sysa";
   };
 
-  scan_lex_l = fetchurl {
-    url = "${liveBootstrap}/files/scan.lex.l";
-    sha256 = "0ilwrhvq02r6kf7rbf0c7b2664nwiaq0zd6g7waz0qmr27f1pij4";
-  };
+  makefile = liveBootstrap."mk/main.mk";
+
+  scan_lex_l = liveBootstrap."files/scan.lex.l";
 
   patches = [
     # Comments are unsupported by our flex
-    (fetchurl {
-      url = "${liveBootstrap}/patches/scan_l.patch";
-      sha256 = "0bs2af6wzi1ih10jyhmhcfplmqi1jcz0r3gsmimi14lh9lwmmama";
-    })
+    liveBootstrap."patches/scan_l.patch"
     # yyin has an odd redefinition error in scan.l, so we ensure that we don't
     # acidentally re-declare it.
-    (fetchurl {
-      url = "${liveBootstrap}/patches/yyin.patch";
-      sha256 = "01fhfi80pldw7wk52dswagc10xwbf78wxfnwllfb78mahzbwal1b";
-    })
+    liveBootstrap."patches/yyin.patch"
   ];
 in
 runCommand "${pname}-${version}" {

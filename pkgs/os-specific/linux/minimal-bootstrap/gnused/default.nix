@@ -6,6 +6,7 @@
 , tinycc
 , gnumake
 , coreutils
+, live-bootstrap-files
 , bootstrap ? false, gnused, gnugrep
 }:
 let
@@ -20,10 +21,13 @@ let
 
   # Thanks to the live-bootstrap project!
   # See https://github.com/fosslinux/live-bootstrap/blob/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/sed-4.0.9/sed-4.0.9.kaem
-  makefile = fetchurl {
-    url = "https://github.com/fosslinux/live-bootstrap/raw/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/sed-4.0.9/mk/main.mk";
-    sha256 = "0w1f5ri0g5zla31m6l6xyzbqwdvandqfnzrsw90dd6ak126w3mya";
+  liveBootstrap = live-bootstrap-files.packageFiles {
+    pname = "sed";
+    inherit version;
+    parent = "sysa";
   };
+
+  makefile = liveBootstrap."mk/main.mk";
 in
 bash.runCommand "${pname}-${version}" {
   inherit pname version;

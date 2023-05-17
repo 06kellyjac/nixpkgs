@@ -14,6 +14,8 @@ lib.makeScope
 
     inherit (callPackage ./stage0-posix { }) kaem m2libc mescc-tools mescc-tools-extra;
 
+    live-bootstrap-files = callPackage ./live-bootstrap-files { };
+
     mes = callPackage ./mes { };
     mes-libc = callPackage ./mes/libc.nix { };
 
