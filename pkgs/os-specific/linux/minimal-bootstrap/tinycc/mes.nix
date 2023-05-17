@@ -17,6 +17,7 @@ let
   rev = "86f3d8e33105435946383aee52487b5ddf918140";
 
   tarball = fetchurl {
+    name = "tinycc-${rev}.tar.gz";
     url = "https://repo.or.cz/tinycc.git/snapshot/${rev}.tar.gz";
     sha256 = "11idrvbwfgj1d03crv994mpbbbyg63j1k64lw1gjy7mkiifw2xap";
   };
