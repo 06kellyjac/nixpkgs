@@ -34,7 +34,7 @@ let
     # touch: add -h to change symlink timestamps, where supported
     touch-dereference_patch
     # strcoll() does not exist in mes libc, change it to strcmp.
-    expr-strcmp_patch
+    # expr-strcmp_patch # wont fetch?
     # strcoll() does not exist in mes libc, change it to strcmp.
     # hard_LC_COLLATE is used but not declared when HAVE_SETLOCALE is unset.
     sort-locale_patch

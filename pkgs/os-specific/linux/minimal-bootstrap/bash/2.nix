@@ -31,7 +31,7 @@ let
     # to reflect this.
     lbFiles.tinycc_patch
     # add ifdef's for features we don't want
-    lbFiles.missing-defines_patch
+    # lbFiles.missing-defines_patch # wont fetch?
     # mes libc + setting locale = not worky
     lbFiles.locale_patch
     # We do not have /dev at this stage of the bootstrap, including /dev/tty

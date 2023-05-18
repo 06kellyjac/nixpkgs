@@ -9,7 +9,7 @@
       "sysa/bash-2.05b/patches/dev-tty.patch"
       "sysa/bash-2.05b/patches/locale.patch"
       "sysa/bash-2.05b/patches/mes-libc.patch"
-      "sysa/bash-2.05b/patches/missing-defines.patch"
+      # "sysa/bash-2.05b/patches/missing-defines.patch" # wont fetch?
       "sysa/bash-2.05b/patches/tinycc.patch"
     ];
     sha256 = "0s7spx3jbmflp8vr0hkr466nwn92wy56r0wxx4lmkrdp7a6hs8mc";
@@ -24,7 +24,7 @@
   "e86db47b6ee40d68e26866dd15e8637f64d6d778" = {
     files = [
       "sysa/coreutils-5.0/mk/main.mk"
-      "sysa/coreutils-5.0/patches/expr-strcmp.patch"
+      # "sysa/coreutils-5.0/patches/expr-strcmp.patch" # wont fetch?
       "sysa/coreutils-5.0/patches/ls-strcmp.patch"
       "sysa/coreutils-5.0/patches/mbstate.patch"
       "sysa/coreutils-5.0/patches/modechange.patch"

@@ -23,7 +23,7 @@ let
     sha256 = "18r2a00k82hz0mqdvgm7crzc7305l36109c0j9yjmkxj2alcjw0k";
   };
 
-  lbFiles = getLBFiles coreutils.passthru.lbRequirements;
+  lbFiles = getLBFiles musl.passthru.lbRequirements;
 
   patches = [
     lbFiles.avoid_set_thread_area_patch
