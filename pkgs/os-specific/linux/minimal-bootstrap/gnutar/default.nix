@@ -3,7 +3,9 @@
 , fetchurl
 , tinycc
 , gnumake
-, live-bootstrap-files
+, getLBFiles
+
+, gnutar
 }:
 let
   pname = "gnutar";
@@ -14,18 +16,10 @@ let
     sha256 = "02m6gajm647n8l9a5bnld6fnbgdpyi4i3i83p7xcwv0kif47xhy6";
   };
 
-  # Thanks to the live-bootstrap project!
-  # See https://github.com/fosslinux/live-bootstrap/blob/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/tar-1.12/tar-1.12.kaem
-  liveBootstrap = live-bootstrap-files.packageFiles {
-    pname = "tar";
-    inherit version;
-    parent = "sysa";
-  };
-
-  makefile = liveBootstrap."mk/main.mk";
+  lbFiles = getLBFiles gnutar.passthru.lbRequirements;
 
   # stub getdate() that always returns 0
-  getdate_stub_c = liveBootstrap."files/getdate_stub.c";
+  getdate_stub_c = lbFiles.getdate_stub_c;
 
   # stat is deliberately hacked to be lstat.
   # In src/system.h tar already defines lstat to be stat
@@ -34,7 +28,7 @@ let
   # to have separate stat and lstat functions.
   # Thus here we break tar with --dereference option but we don't use
   # this option in live-bootstrap.
-  stat_override_c = liveBootstrap."files/stat_override.c";
+  stat_override_c = lbFiles.stat_override_c;
 in
 runCommand "${pname}-${version}" {
   inherit pname version;
@@ -43,6 +37,17 @@ runCommand "${pname}-${version}" {
     tinycc
     gnumake
   ];
+
+  # Thanks to the live-bootstrap project!
+  # See https://github.com/fosslinux/live-bootstrap/blob/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/tar-1.12/tar-1.12.kaem
+  passthru.lbRequirements = {
+    commit = "1bc4296091c51f53a5598050c8956d16e945b0f5";
+    files = let prefix = "sysa/tar-${version}"; in {
+      makefile = "${prefix}/mk/main.mk";
+      getdate_stub_c = "${prefix}/files/getdate_stub.c";
+      stat_override_c = "${prefix}/files/stat_override.c";
+    };
+  };
 
   meta = with lib; {
     description = "GNU implementation of the `tar' archiver";
@@ -61,7 +66,7 @@ runCommand "${pname}-${version}" {
   cd ''${build}
 
   # Configure
-  cp ${makefile} Makefile
+  cp ${lbFiles.makefile} Makefile
   cp ${getdate_stub_c} lib/getdate_stub.c
   catm src/create.c.new ${stat_override_c} src/create.c
   cp src/create.c.new src/create.c

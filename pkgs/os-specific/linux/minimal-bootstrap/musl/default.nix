@@ -10,7 +10,9 @@
 , gnused
 , gnugrep
 , coreutils
-, stdenv
+, getLBFiles
+
+, musl
 }:
 let
   pname = "musl";
@@ -21,42 +23,17 @@ let
     sha256 = "18r2a00k82hz0mqdvgm7crzc7305l36109c0j9yjmkxj2alcjw0k";
   };
 
-  # Thanks to the live-bootstrap project!
-  # See https://github.com/fosslinux/live-bootstrap/blob/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/musl-1.1.24
-  liveBootstrap = "https://github.com/fosslinux/live-bootstrap/raw/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/musl-1.1.24";
+  lbFiles = getLBFiles coreutils.passthru.lbRequirements;
+
   patches = [
-    (fetchurl {
-      url = "${liveBootstrap}/patches/avoid_set_thread_area.patch";
-      sha256 = "1yxhjxqm1x6i5jrmiipbanasbjzs0nvqn2ni3ccs7z1qg5jw3ijf";
-    })
-    (fetchurl {
-      url = "${liveBootstrap}/patches/avoid_sys_clone.patch";
-      sha256 = "0gij41g83pf13vjw9608v42j4q3acc9y3l6pqndwkv3rhbmqg6gx";
-    })
-    (fetchurl {
-      url = "${liveBootstrap}/patches/fenv.patch";
-      sha256 = "0cl98hvz9f32n37bk1pg0sl8kd6k6sh4lb4qbc4y0xbqhf74didw";
-    })
-    (fetchurl {
-      url = "${liveBootstrap}/patches/makefile.patch";
-      sha256 = "1g6555dfgvl1k3a4gn77fcd83klqp4d8c8c25hfv3ci70l29hy6k";
-    })
-    (fetchurl {
-      url = "${liveBootstrap}/patches/musl_weak_symbols.patch";
-      sha256 = "1zg2l17zg6s1ddkry5bpqks1q9haz2j7nwidr9pfz994wpcmmpzx";
-    })
-    (fetchurl {
-      url = "${liveBootstrap}/patches/set_thread_area.patch";
-      sha256 = "1kdcjkyqsm6h31wnyiymhnd52063w8d551a8zwbiwjyinslmi1j4";
-    })
-    (fetchurl {
-      url = "${liveBootstrap}/patches/sigsetjmp.patch";
-      sha256 = "1xg0r83dx98cp1m90m5kq8h7b6m7msldsxxgvvr9ag3kzmx81pf1";
-    })
-    (fetchurl {
-      url = "${liveBootstrap}/patches/va_list.patch";
-      sha256 = "1y7fmkzmrpq46w182crc4s9nb8fa0axqsvz547q2s2lqbwi0qrsj";
-    })
+    lbFiles.avoid_set_thread_area_patch
+    lbFiles.avoid_sys_clone_patch
+    lbFiles.fenv_patch
+    lbFiles.makefile_patch
+    lbFiles.musl_weak_symbols_patch
+    lbFiles.set_thread_area_patch
+    lbFiles.sigsetjmp_patch
+    lbFiles.va_list_patch
 
     # Including this patch causes a compiler error
     #   src/exit/exit.c:12: error: implicit declaration of function '_fini'
@@ -79,6 +56,22 @@ runCommand "${pname}-${version}" {
     gnugrep
     coreutils
   ];
+
+  # Thanks to the live-bootstrap project!
+  # See https://github.com/fosslinux/live-bootstrap/blob/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/musl-1.1.24
+  passthru.lbRequirements = {
+    commit = "1bc4296091c51f53a5598050c8956d16e945b0f5";
+    files = let prefix = "sysa/${pname}-${version}"; in {
+      avoid_set_thread_area_patch = "${prefix}/patches/avoid_set_thread_area.patch";
+      avoid_sys_clone_patch = "${prefix}/patches/avoid_sys_clone.patch";
+      fenv_patch = "${prefix}/patches/fenv.patch";
+      makefile_patch = "${prefix}/patches/makefile.patch";
+      musl_weak_symbols_patch = "${prefix}/patches/musl_weak_symbols.patch";
+      set_thread_area_patch = "${prefix}/patches/set_thread_area.patch";
+      sigsetjmp_patch = "${prefix}/patches/sigsetjmp.patch";
+      va_list_patch = "${prefix}/patches/va_list.patch";
+    };
+  };
 
   meta = with lib; {
     description = "An efficient, small, quality libc implementation";

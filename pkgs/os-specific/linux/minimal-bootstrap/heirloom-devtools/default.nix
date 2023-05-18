@@ -5,6 +5,9 @@
 , gnumake
 , gnupatch
 , coreutils
+, getLBFiles
+
+, heirloom-devtools
 }:
 let
   pname = "heirloom-devtools";
@@ -15,21 +18,13 @@ let
     sha256 = "9f233d8b78e4351fe9dd2d50d83958a0e5af36f54e9818521458a08e058691ba";
   };
 
-  # Thanks to the live-bootstrap project!
-  # See https://github.com/fosslinux/live-bootstrap/blob/d918b984ad6fe4fc7680f3be060fd82f8c9fddd9/sysa/heirloom-devtools-070527/heirloom-devtools-070527.kaem
-  liveBootstrap = "https://github.com/fosslinux/live-bootstrap/raw/d918b984ad6fe4fc7680f3be060fd82f8c9fddd9/sysa/heirloom-devtools-070527";
+  lbFiles = getLBFiles heirloom-devtools.passthru.lbRequirements;
 
   patches = [
     # Remove all kinds of wchar support. Mes Libc does not support wchar in any form
-    (fetchurl {
-      url = "${liveBootstrap}/patches/yacc_remove_wchar.patch";
-      sha256 = "0wgiz02bb7xzjy2gnbjp8y31qy6rc4b29v01zi32zh9lw54j68hc";
-    })
+    lbFiles.yacc_remove_wchar_patch
     # Similarly to yacc, remove wchar. See yacc patch for further information
-    (fetchurl {
-      url = "${liveBootstrap}/patches/lex_remove_wchar.patch";
-      sha256 = "168dfngi51ljjqgd55wbvmffaq61gk48gak50ymnl1br92qkp4zh";
-    })
+    lbFiles.lex_remove_wchar
   ];
 in
 runCommand "${pname}-${version}" {
@@ -41,6 +36,16 @@ runCommand "${pname}-${version}" {
     gnupatch
     coreutils
   ];
+
+  # Thanks to the live-bootstrap project!
+  # See https://github.com/fosslinux/live-bootstrap/blob/d918b984ad6fe4fc7680f3be060fd82f8c9fddd9/sysa/heirloom-devtools-070527/heirloom-devtools-070527.kaem
+  passthru.lbRequirements = {
+    commit = "d918b984ad6fe4fc7680f3be060fd82f8c9fddd9";
+    files = let prefix = "sysa/${pname}-${version}"; in {
+      yacc_remove_wchar_patch = "${prefix}/patches/yacc_remove_wchar.patch";
+      lex_remove_wchar_patch = "${prefix}/patches/lex_remove_wchar.patch";
+    };
+  };
 
   meta = with lib; {
     description = "Portable yacc and lex derived from OpenSolaris";

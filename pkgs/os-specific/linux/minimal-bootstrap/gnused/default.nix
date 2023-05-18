@@ -6,7 +6,7 @@
 , tinycc
 , gnumake
 , coreutils
-, live-bootstrap-files
+, getLBFiles
 , bootstrap ? false, gnused, gnugrep
 }:
 let
@@ -19,15 +19,7 @@ let
     sha256 = "0006gk1dw2582xsvgx6y6rzs9zw8b36rhafjwm288zqqji3qfrf3";
   };
 
-  # Thanks to the live-bootstrap project!
-  # See https://github.com/fosslinux/live-bootstrap/blob/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/sed-4.0.9/sed-4.0.9.kaem
-  liveBootstrap = live-bootstrap-files.packageFiles {
-    pname = "sed";
-    inherit version;
-    parent = "sysa";
-  };
-
-  makefile = liveBootstrap."mk/main.mk";
+  lbFiles = getLBFiles gnused.passthru.lbRequirements;
 in
 bash.runCommand "${pname}-${version}" {
   inherit pname version;
@@ -40,6 +32,15 @@ bash.runCommand "${pname}-${version}" {
     gnused
     gnugrep
   ];
+
+  # Thanks to the live-bootstrap project!
+  # See https://github.com/fosslinux/live-bootstrap/blob/1bc4296091c51f53a5598050c8956d16e945b0f5/sysa/sed-1.12/sed-1.12.kaem
+  passthru.lbRequirements = {
+    commit = "1bc4296091c51f53a5598050c8956d16e945b0f5";
+    files = let prefix = "sysa/${pname}-${version}"; in {
+      makefile = "${prefix}/mk/main.mk";
+    };
+  };
 
   meta = with lib; {
     description = "GNU sed, a batch stream editor";
@@ -57,7 +58,7 @@ bash.runCommand "${pname}-${version}" {
   cd sed-${version}
 '' + lib.optionalString bootstrap ''
   # Configure
-  cp ${makefile} Makefile
+  cp ${lbFiles.makefile} Makefile
   catm config.h
 
   # Build

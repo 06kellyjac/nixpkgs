@@ -14,7 +14,7 @@ lib.makeScope
 
     inherit (callPackage ./stage0-posix { }) kaem m2libc mescc-tools mescc-tools-extra;
 
-    live-bootstrap-files = callPackage ./live-bootstrap-files { };
+    inherit (callPackage ./live-bootstrap { }) getLBFiles;
 
     mes = callPackage ./mes { };
     mes-libc = callPackage ./mes/libc.nix { };
@@ -46,18 +46,18 @@ lib.makeScope
 
     gnutar = callPackage ./gnutar { tinycc = tinycc-mes; };
 
-    flex-boot = callPackage ./flex {
-      bash = bash_2_05;
-      tinycc = tinycc-mes;
-      bootstrap = true;
-    };
+    # flex-boot = callPackage ./flex {
+    #   bash = bash_2_05;
+    #   tinycc = tinycc-mes;
+    #   bootstrap = true;
+    # };
 
-    flex = callPackage ./flex {
-      bash = bash_2_05;
-      tinycc = tinycc-mes;
-      bootstrap = false;
-      flex = flex-boot;
-    };
+    # flex = callPackage ./flex {
+    #   bash = bash_2_05;
+    #   tinycc = tinycc-mes;
+    #   bootstrap = false;
+    #   flex = flex-boot;
+    # };
 
     musl = callPackage ./musl {
       bash = bash_2_05;

@@ -4,6 +4,9 @@
 , tinycc
 , gnumake
 , gnupatch
+, getLBFiles
+
+, coreutils
 }:
 let
   pname = "coreutils";
@@ -14,55 +17,27 @@ let
     sha256 = "10wq6k66i8adr4k08p0xmg87ff4ypiazvwzlmi7myib27xgffz62";
   };
 
-  # Thanks to the live-bootstrap project!
-  # See https://github.com/fosslinux/live-bootstrap/blob/e86db47b6ee40d68e26866dd15e8637f64d6d778/sysa/coreutils-5.0/coreutils-5.0.kaem
-  liveBootstrap = "https://github.com/fosslinux/live-bootstrap/raw/e86db47b6ee40d68e26866dd15e8637f64d6d778/sysa/coreutils-5.0";
+  lbFiles = getLBFiles coreutils.passthru.lbRequirements;
 
-  makefile = fetchurl {
-    url = "${liveBootstrap}/mk/main.mk";
-    sha256 = "0njg4xccxfqrslrmlb8ls7h6hlnfmdx42nvxwmca8flvczwrplfd";
-  };
-
-  patches = [
+  patches = with lbFiles; [
     # modechange.h uses functions defined in sys/stat.h, so we need to move it to
     # after sys/stat.h include.
-    (fetchurl {
-      url = "${liveBootstrap}/patches/modechange.patch";
-      sha256 = "04xa4a5w2syjs3xs6qhh8kdzqavxnrxpxwyhc3qqykpk699p3ms5";
-    })
+    modechange_patch
     # mbstate_t is a struct that is required. However, it is not defined by mes libc.
-    (fetchurl {
-      url = "${liveBootstrap}/patches/mbstate.patch";
-      sha256 = "0rz3c0sflgxjv445xs87b83i7gmjpl2l78jzp6nm3khdbpcc53vy";
-    })
+    mbstate_patch
     # strcoll() does not exist in mes libc, change it to strcmp.
-    (fetchurl {
-      url = "${liveBootstrap}/patches/ls-strcmp.patch";
-      sha256 = "0lx8rz4sxq3bvncbbr6jf0kyn5bqwlfv9gxyafp0541dld6l55p6";
-    })
+    ls-strcmp_patch
     # getdate.c is pre-compiled from getdate.y
     # At this point we don't have bison yet and in any case getdate.y does not
     # compile when generated with modern bison.
-    (fetchurl {
-      url = "${liveBootstrap}/patches/touch-getdate.patch";
-      sha256 = "1xd3z57lvkj7r8vs5n0hb9cxzlyp58pji7d335snajbxzwy144ma";
-    })
+    touch-getdate_patch
     # touch: add -h to change symlink timestamps, where supported
-    (fetchurl {
-      url = "${liveBootstrap}/patches/touch-dereference.patch";
-      sha256 = "0wky5r3k028xwyf6g6ycwqxzc7cscgmbymncjg948vv4qxsxlfda";
-    })
+    touch-dereference_patch
     # strcoll() does not exist in mes libc, change it to strcmp.
-    (fetchurl {
-      url = "${liveBootstrap}/patches/expr-strcmp.patch";
-      sha256 = "19f31lfsm1iwqzvp2fyv97lmqg4730prfygz9zip58651jf739a9";
-    })
+    expr-strcmp_patch
     # strcoll() does not exist in mes libc, change it to strcmp.
     # hard_LC_COLLATE is used but not declared when HAVE_SETLOCALE is unset.
-    (fetchurl {
-      url = "${liveBootstrap}/patches/sort-locale.patch";
-      sha256 = "0bdch18mpyyxyl6gyqfs0wb4pap9flr11izqdyxccx1hhz0a2i6c";
-    })
+    sort-locale_patch
   ];
 in
 runCommand "${pname}-${version}" {
@@ -73,6 +48,22 @@ runCommand "${pname}-${version}" {
     gnumake
     gnupatch
   ];
+
+  # Thanks to the live-bootstrap project!
+  # See https://github.com/fosslinux/live-bootstrap/blob/e86db47b6ee40d68e26866dd15e8637f64d6d778/sysa/coreutils-5.0/coreutils-5.0.kaem
+  passthru.lbRequirements = {
+    commit = "e86db47b6ee40d68e26866dd15e8637f64d6d778";
+    files = let prefix = "sysa/${pname}-${version}"; in {
+      makefile = "${prefix}/mk/main.mk";
+      modechange_patch = "${prefix}/patches/modechange.patch";
+      mbstate_patch = "${prefix}/patches/mbstate.patch";
+      ls-strcmp_patch = "${prefix}/patches/ls-strcmp.patch";
+      touch-getdate_patch = "${prefix}/patches/touch-getdate.patch";
+      touch-dereference_patch = "${prefix}/patches/touch-dereference.patch";
+      expr-strcmp_patch = "${prefix}/patches/expr-strcmp.patch";
+      sort-locale_patch = "${prefix}/patches/sort-locale.patch";
+    };
+  };
 
   meta = with lib; {
     description = "The GNU Core Utilities";
@@ -99,12 +90,12 @@ runCommand "${pname}-${version}" {
   rm src/dircolors.h
 
   # Build
-  make -f ${makefile} PREFIX=''${out}
+  make -f ${lbFiles.makefile} PREFIX=''${out}
 
   # Check
   ./src/echo "Hello coreutils!"
 
   # Install
   ./src/mkdir -p ''${out}/bin
-  make -f ${makefile} install PREFIX=''${out}
+  make -f ${lbFiles.makefile} install PREFIX=''${out}
 ''
