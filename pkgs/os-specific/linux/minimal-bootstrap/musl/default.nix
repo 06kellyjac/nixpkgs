@@ -1,4 +1,6 @@
 { lib
+, buildPlatform
+, hostPlatform
 , runCommand
 , fetchurl
 , tinycc
@@ -8,7 +10,6 @@
 , gnused
 , gnugrep
 , coreutils
-, stdenv
 }:
 let
   pname = "musl";
@@ -79,9 +80,9 @@ runCommand "${pname}-${version}" {
   ];
 
   meta = with lib; {
-    description = "GNU implementation of the Unix grep command";
-    homepage = "https://www.gnu.org/software/grep";
-    license = licenses.gpl3Plus;
+    description = "An efficient, small, quality libc implementation";
+    homepage = "https://musl.libc.org/";
+    license = licenses.mit;
     maintainers = with maintainers; [ emilytrau ];
     platforms = platforms.unix;
   };
@@ -106,8 +107,8 @@ runCommand "${pname}-${version}" {
     CFLAGS="-DSYSCALL_NO_TLS" \
     --disable-shared \
     --prefix=''${out} \
-    --build=${stdenv.buildPlatform.config} \
-    --host=${stdenv.hostPlatform.config}
+    --build=${buildPlatform.config} \
+    --host=${hostPlatform.config}
 
   # Build
   make
