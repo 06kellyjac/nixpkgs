@@ -17,10 +17,13 @@ lib.makeScope
     mes = callPackage ./mes { };
     mes-libc = callPackage ./mes/libc.nix { };
 
+    live-bootstrap-srcs = (callPackage ./live-bootstrap { }).copies;
+
     ln-boot = callPackage ./ln-boot { };
 
     tinycc-bootstrappable = callPackage ./tinycc/bootstrappable.nix { };
     tinycc-mes = callPackage ./tinycc/mes.nix { };
+    tinycc-musl = callPackage ./tinycc/musl.nix { tinycc = tinycc-mes; bash = bash_2_05; };
 
     gnupatch = callPackage ./gnupatch { tinycc = tinycc-mes; };
 
@@ -43,6 +46,7 @@ lib.makeScope
     heirloom-devtools = callPackage ./heirloom-devtools { tinycc = tinycc-mes; };
 
     gnutar = callPackage ./gnutar { tinycc = tinycc-mes; };
+    gnutar_1_14 = callPackage ./gnutar_1_14 { tinycc = tinycc-mes; bash = bash_2_05; };
 
     flex-boot = callPackage ./flex {
       bash = bash_2_05;
