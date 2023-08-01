@@ -9,17 +9,13 @@
 
 stdenv.mkDerivation rec {
   pname = "jq";
-  version = "1.6";
+  version = "1.7rc1";
 
   # Note: do not use fetchpatch or fetchFromGitHub to keep this package available in __bootPackages
   src = fetchurl {
-    url = "https://github.com/stedolan/jq/releases/download/jq-${version}/jq-${version}.tar.gz";
-    sha256 = "sha256-XejI4pqqP7nMa0e7JymfJxNU67clFOOsytx9OLW7qnI=";
+    url = "https://github.com/jqlang/jq/releases/download/jq-${version}/jq-${version}.tar.gz";
+    sha256 = "sha256-pqeDfLRsYahmZGf+8GdU/lO5XBYmtUFq2ljt/hOT2sM=";
   };
-
-  patches = [
-    ./fix-tests-when-building-without-regex-supports.patch
-  ];
 
   outputs = [ "bin" "doc" "man" "dev" "lib" "out" ];
 
@@ -71,10 +67,23 @@ stdenv.mkDerivation rec {
 
   meta = with lib; {
     description = "A lightweight and flexible command-line JSON processor";
-    homepage = "https://stedolan.github.io/jq/";
+    longDescription = ''
+      jq is like sed for JSON data - you can use it to slice and filter and map
+      and transform structured data with the same ease that sed, awk, grep and
+      friends let you play with text.
+
+      jq is written in portable C, and it has zero runtime dependencies. You can
+      download a single binary, scp it to a far away machine of the same type,
+      and expect it to work.
+
+      jq can mangle the data format that you have into the one that you want
+      with very little effort, and the program to do so is often shorter and
+      simpler than you'd expect.
+    '';
+    homepage = "https://jqlang.github.io/jq/";
     license = licenses.mit;
-    maintainers = with maintainers; [ raskin globin artturin ];
+    maintainers = with maintainers; [ raskin globin artturin jk ];
     platforms = platforms.unix;
-    downloadPage = "https://stedolan.github.io/jq/download/";
+    downloadPage = "https://jqlang.github.io/jq/download/";
   };
 }
