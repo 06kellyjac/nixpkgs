@@ -7,14 +7,16 @@ import ../make-test-python.nix ({ ... }: {
       security.pam.pwquality = {
         enable = true;
 
-        minlen = 10;
+        settings = {
+          minlen = 10;
 
-        # require each class: lowercase uppercase digit and symbol/other
-        minclass = 4;
+          # require each class: lowercase uppercase digit and symbol/other
+          minclass = 4;
 
-        badwords = [ "foobar" "hunter42" "password" ];
+          badwords = [ "foobar" "hunter42" "password" ];
 
-        enforce_for_root = true;
+          enforce_for_root = true;
+        };
       };
     };
 
