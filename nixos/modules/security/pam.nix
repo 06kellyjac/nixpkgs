@@ -771,7 +771,7 @@ let
 
         password = autoOrderRules [
           { name = "systemd_home"; enable = config.services.homed.enable; control = "sufficient"; modulePath = "${config.systemd.package}/lib/security/pam_systemd_home.so"; }
-          { name = "pwquality"; enable = config.security.pam.pwquality.enable; control = "sufficient"; modulePath = "${lib.getLib config.security.pam.pwquality.package}/lib/security/pam_pwquality.so"; }
+          { name = "pwquality"; enable = config.security.pam.pwquality.enable; control = "required"; modulePath = "${lib.getLib config.security.pam.pwquality.package}/lib/security/pam_pwquality.so"; }
           { name = "unix"; control = "sufficient"; modulePath = "pam_unix.so"; settings = {
             nullok = true;
             yescrypt = true;
