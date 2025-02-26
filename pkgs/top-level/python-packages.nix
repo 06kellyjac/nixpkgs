@@ -5645,6 +5645,11 @@ self: super: with self; {
 
   grammalecte = callPackage ../development/python-modules/grammalecte { };
 
+  # gramps = callPackage ../development/python-modules/gramps { };
+  gramps = toPythonModule (pkgs.gramps.override { python3 = self.python; });
+
+  gramps-ql = callPackage ../development/python-modules/gramps-ql { };
+
   grandalf = callPackage ../development/python-modules/grandalf { };
 
   grapheme = callPackage ../development/python-modules/grapheme { };
@@ -9681,6 +9686,8 @@ self: super: with self; {
 
   objax = callPackage ../development/python-modules/objax { };
 
+  object-ql = callPackage ../development/python-modules/object-ql { };
+
   objexplore = callPackage ../development/python-modules/objexplore { };
 
   objprint = callPackage ../development/python-modules/objprint { };
@@ -13102,6 +13109,8 @@ self: super: with self; {
 
   pytest-django = callPackage ../development/python-modules/pytest-django { };
 
+  pytest-docker = callPackage ../development/python-modules/pytest-docker { };
+
   pytest-docker-tools = callPackage ../development/python-modules/pytest-docker-tools { };
 
   pytest-doctestplus = callPackage ../development/python-modules/pytest-doctestplus { };
@@ -15037,6 +15046,8 @@ self: super: with self; {
   shutilwhich = callPackage ../development/python-modules/shutilwhich { };
 
   sievelib = callPackage ../development/python-modules/sievelib { };
+
+  sifts = callPackage ../development/python-modules/sifts { };
 
   signalslot = callPackage ../development/python-modules/signalslot { };
 
