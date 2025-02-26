@@ -2,7 +2,7 @@
   lib,
   fetchFromGitHub,
   gtk3,
-  python3Packages,
+  python3,
   glibcLocales,
   intltool,
   gexiv2,
@@ -21,6 +21,7 @@
 }:
 
 let
+  python3Packages = python3.pkgs;
   inherit (python3Packages) buildPythonApplication pythonOlder;
 in
 buildPythonApplication rec {
