@@ -2917,6 +2917,8 @@ self: super: with self; {
 
   commonregex = callPackage ../development/python-modules/commonregex { };
 
+  compel = callPackage ../development/python-modules/compel { };
+
   compliance-trestle = callPackage ../development/python-modules/compliance-trestle { };
 
   complycube = callPackage ../development/python-modules/complycube { };
