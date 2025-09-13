@@ -13792,6 +13792,8 @@ self: super: with self; {
 
   pypasser = callPackage ../development/python-modules/pypasser { };
 
+  pypatchmatch = callPackage ../development/python-modules/pypatchmatch { };
+
   pypblib = callPackage ../development/python-modules/pypblib { };
 
   pypca = callPackage ../development/python-modules/pypca { };
