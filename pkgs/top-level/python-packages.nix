@@ -9215,6 +9215,8 @@ self: super: with self; {
 
   mediafire-dl = callPackage ../development/python-modules/mediafire-dl { };
 
+  mediapipe = callPackage ../development/python-modules/mediapipe { };
+
   mediapy = callPackage ../development/python-modules/mediapy { };
 
   medpy = callPackage ../development/python-modules/medpy { };
