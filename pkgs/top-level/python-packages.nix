@@ -4526,6 +4526,8 @@ self: super: with self; {
 
   dynalite-panel = callPackage ../development/python-modules/dynalite-panel { };
 
+  dynamicprompts = callPackage ../development/python-modules/dynamicprompts { };
+
   dynd = callPackage ../development/python-modules/dynd { };
 
   e2b = callPackage ../development/python-modules/e2b { };
