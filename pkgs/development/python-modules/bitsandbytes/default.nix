@@ -12,16 +12,32 @@
 
   # dependencies
   scipy,
+
+  gpuTargets ? [ ],
 }:
 
 let
   pname = "bitsandbytes";
   version = "0.47.0";
 
-  inherit (torch) cudaPackages cudaSupport;
+  inherit (torch) cudaPackages cudaSupport rocmPackages rocmSupport;
   inherit (cudaPackages) cudaMajorMinorVersion;
+  rocmMajorMinorVersion = lib.versions.majorMinor rocmPackages.rocm-core.version;
 
   cudaMajorMinorVersionString = lib.replaceStrings [ "." ] [ "" ] cudaMajorMinorVersion;
+
+  rocmMajorMinorVersionString = lib.replaceStrings [ "." ] [ "" ] rocmMajorMinorVersion;
+
+  # Create the gpuTargetString.
+  gpuTargetString = lib.strings.concatStringsSep ";" (
+    if gpuTargets != [ ] then
+      # If gpuTargets is specified, it always takes priority.
+      gpuTargets
+    else if rocmSupport then
+      rocmPackages.clr.gpuTargets
+    else
+      throw "No GPU targets specified"
+  );
 
   # NOTE: torchvision doesn't use cudnn; torch does!
   #   For this reason it is not included.
@@ -50,8 +66,39 @@ let
   };
 
   cuda-redist = symlinkJoin {
-    name = "cuda-redist-${cudaMajorMinorVersion}";
+    name = "cuda-redist-${rocmMajorMinorVersion}";
     paths = cuda-common-redist;
+  };
+
+  rocm-common-redist = with rocmPackages; [
+    clr
+    rocthrust
+    rocprim
+    hipsparse
+    hipblas
+
+    hiprand
+    rocrand
+    hipblaslt
+    # rocblas
+    (lib.getDev rocblas) # rocblas/rocblas.h
+    (lib.getLib rocblas) # rocblas/rocblas.h
+    hipblas-common
+    hipcub
+  ];
+
+  rocm-native-redist = symlinkJoin {
+    name = "rocm-native-redist-${rocmMajorMinorVersion}";
+    paths =
+      with rocmPackages;
+      [
+      ]
+      ++ rocm-common-redist;
+  };
+
+  rocm-redist = symlinkJoin {
+    name = "rocm-redist-${rocmMajorMinorVersion}";
+    paths = rocm-common-redist;
   };
 in
 buildPythonPackage {
@@ -79,6 +126,12 @@ buildPythonPackage {
       --replace-fail \
         "cuda_binary_path = get_cuda_bnb_library_path(cuda_specs)" \
         "cuda_binary_path = PACKAGE_DIR / 'libbitsandbytes_cuda${cudaMajorMinorVersionString}.so'"
+  '' + lib.optionalString rocmSupport ''
+    substituteInPlace bitsandbytes/cextension.py \
+      --replace-fail "if cuda_specs:" "if True:" \
+      --replace-fail \
+        "cuda_binary_path = get_cuda_bnb_library_path(cuda_specs)" \
+        "cuda_binary_path = PACKAGE_DIR / 'libbitsandbytes_rocm${rocmMajorMinorVersionString}.so'"
   '';
 
   nativeBuildInputs = [
@@ -86,6 +139,10 @@ buildPythonPackage {
   ]
   ++ lib.optionals cudaSupport [
     cudaPackages.cuda_nvcc
+  ]
+  ++ lib.optionals rocmSupport [
+    rocmPackages.hipcc
+    rocmPackages.rocminfo
   ];
 
   build-system = [
@@ -93,16 +150,17 @@ buildPythonPackage {
     setuptools
   ];
 
-  buildInputs = lib.optionals cudaSupport [ cuda-redist ];
+  buildInputs = lib.optional cudaSupport cuda-redist ++ lib.optional rocmSupport rocm-redist;
 
   cmakeFlags = [
-    (lib.cmakeFeature "COMPUTE_BACKEND" (if cudaSupport then "cuda" else "cpu"))
-  ];
+    (lib.cmakeFeature "COMPUTE_BACKEND" (if cudaSupport then "cuda" else if rocmSupport then "hip" else "cpu"))
+  ] ++ lib.optional rocmSupport (lib.cmakeFeature "AMDGPU_TARGETS" "${gpuTargetString}");
   CUDA_HOME = lib.optionalString cudaSupport "${cuda-native-redist}";
   NVCC_PREPEND_FLAGS = lib.optionals cudaSupport [
     "-I${cuda-native-redist}/include"
     "-L${cuda-native-redist}/lib"
   ];
+  ROCM_PATH = lib.optionalString rocmSupport "${rocm-native-redist}";
 
   preBuild = ''
     make -j $NIX_BUILD_CORES
