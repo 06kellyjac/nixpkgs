@@ -10,7 +10,12 @@
   rocmSupport ? config.rocmSupport,
   rocmPackages ? { },
 
+  additionalDependencies ? [],
+
   versionCheckHook,
+
+  stdenvNoCC,
+  callPackage,
 }:
 
 # on 3.12 due to mediapipe
@@ -119,7 +124,7 @@ python312Packages.buildPythonApplication rec {
     # torchvision
     transformers
     uvicorn
-  ];
+  ] ++ additionalDependencies;
 
   optional-dependencies = with python312Packages; {
     cpu = [
@@ -180,6 +185,14 @@ python312Packages.buildPythonApplication rec {
   doInstallCheck = true;
   nativeInstallCheckInputs = [ versionCheckHook ];
   versionCheckProgramArg = "--version";
+
+  passthru.plugins.chroma_invoke = callPackage ./nodes/chroma_invoke.nix {
+    mkInvokeaiNode = passthru.mkInvokeaiNode;
+    pythonPackages = python312Packages;
+    # python3Packages = python312Packages;
+    # python312Packages = python312Packages;
+  };
+  passthru.mkInvokeaiNode = callPackage ./node-builder.nix { pythonPackages = python312Packages; };
 
   meta = {
     description = "Invoke is a leading creative engine for Stable Diffusion models, empowering professionals, artists, and enthusiasts to generate and create visual media using the latest AI-driven technologies. The solution offers an industry leading WebUI, and serves as the foundation for multiple commercial products";
