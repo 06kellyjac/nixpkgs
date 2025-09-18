@@ -33,6 +33,7 @@ python312Packages.buildPythonApplication rec {
 
   patches = [
     ./swap-to-requests_mock.patch
+    ./custom-nodes-dir-write-readme-optional.patch
   ];
 
   pnpmDeps = pnpm_10.fetchDeps {

@@ -1,0 +1,23 @@
+diff --git a/invokeai/app/invocations/load_custom_nodes.py b/invokeai/app/invocations/load_custom_nodes.py
+index a3a8194a3..e183b39d3 100644
+--- a/invokeai/app/invocations/load_custom_nodes.py
++++ b/invokeai/app/invocations/load_custom_nodes.py
+@@ -1,3 +1,4 @@
++import stat
+ import logging
+ import shutil
+ import sys
+@@ -28,7 +29,12 @@ def load_custom_nodes(custom_nodes_path: Path, logger: logging.Logger):
+     target_custom_nodes_readme_path = Path(custom_nodes_path) / "README.md"
+ 
+     # copy our custom nodes README to the custom nodes directory
+-    shutil.copy(source_custom_nodes_readme_path, target_custom_nodes_readme_path)
++    try:
++        shutil.copy(source_custom_nodes_readme_path, target_custom_nodes_readme_path)
++        # Ensure the copied file is writable for next time we copy over it
++        os.chmod(target_custom_nodes_readme_path, stat.S_IWRITE)
++    except Exception as e:
++        print(f"Couldn't copy README to: {target_custom_nodes_readme_path}, continuing...")
+ 
+     loaded_packs: list[str] = []
+     failed_packs: list[str] = []
