@@ -1,0 +1,23 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 80356c2..061e240 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -30,16 +30,8 @@ find_package(Threads REQUIRED)
+ # Server dependencies (header-only, fetched at configure time)
+ option(QWEN3_TTS_SERVER "Build the OpenAI-compatible TTS server" ON)
+ if(QWEN3_TTS_SERVER)
+-    include(FetchContent)
+-    FetchContent_Declare(httplib
+-        GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+-        GIT_TAG        v0.20.0
+-    )
+-    FetchContent_Declare(nlohmann_json
+-        GIT_REPOSITORY https://github.com/nlohmann/json.git
+-        GIT_TAG        v3.11.3
+-    )
+-    FetchContent_MakeAvailable(httplib nlohmann_json)
++    find_package(httplib REQUIRED)
++    find_package(nlohmann_json REQUIRED)
+ endif()
+ 
+ # PIC is needed for the shared library — set globally so GGML libs get it too
