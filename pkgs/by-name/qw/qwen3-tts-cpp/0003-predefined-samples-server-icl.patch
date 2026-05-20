@@ -1,0 +1,412 @@
+diff --git a/src/server.cpp b/src/server.cpp
+index 2f32986..ad754d8 100644
+--- a/src/server.cpp
++++ b/src/server.cpp
+@@ -229,6 +229,8 @@ struct custom_voice {
+     std::string ref_text;
+     std::vector<int32_t> ref_codes;
+     int32_t n_ref_frames = 0;
++    // Path to the reference wav file (if loaded from disk)
++    std::string wav_path;
+ };
+ 
+ struct server_params {
+@@ -246,6 +248,15 @@ struct server_params {
+     int         top_k              = 50;
+     float       repetition_penalty = 1.05f;
+     int64_t     seed               = -1;
++    // Directory for pre-defined custom voices
++    std::string samples_dir;
++    // Sample voice definitions in format "name,path[,text_ref_path]"
++    struct sample_voice_def {
++        std::string name;
++        std::string path;
++        std::string text_ref_path;
++    };
++    std::vector<sample_voice_def> sample_voices;
+ };
+ 
+ // download a file from a huggingface repo, returns local cache path
+@@ -330,6 +341,8 @@ static void print_usage(const char * program) {
+     fprintf(stderr, "       --top-k <n>                 top-k sampling default (default: 50)\n");
+     fprintf(stderr, "       --repetition-penalty <f>    repetition penalty default (default: 1.05)\n");
+     fprintf(stderr, "       --seed <n>                  default sampling seed (default: -1 = random)\n");
++    fprintf(stderr, "       --samples-dir <dir>         directory with pre-defined custom voices (.wav files)\n");
++    fprintf(stderr, "       --sample <name,path>        define sample voice (can be used multiple times)\n");
+     fprintf(stderr, "  -h,  --help                     show this help\n");
+ }
+ 
+@@ -380,6 +393,35 @@ static bool parse_args(int argc, char ** argv, server_params & sp) {
+         } else if (arg == "--seed") {
+             if (++i >= argc) { fprintf(stderr, "error: missing seed\n"); return false; }
+             sp.seed = std::stoll(argv[i]);
++        } else if (arg == "--samples-dir") {
++            if (++i >= argc) { fprintf(stderr, "error: missing samples directory\n"); return false; }
++            sp.samples_dir = argv[i];
++} else if (arg == "--sample") {
++            if (++i >= argc) { fprintf(stderr, "error: missing sample definition\n"); return false; }
++            std::string sample_def = argv[i];
++            size_t comma_pos = sample_def.find(',');
++            if (comma_pos == std::string::npos) {
++                fprintf(stderr, "error: invalid sample format, expected 'name,path' or 'name,path,text_ref_path'\n");
++                return false;
++            }
++            std::string name = sample_def.substr(0, comma_pos);
++            size_t second_comma_pos = sample_def.find(',', comma_pos + 1);
++            if (second_comma_pos == std::string::npos) {
++                // Only name and path provided
++                std::string path = sample_def.substr(comma_pos + 1);
++                sp.sample_voices.push_back({name, path, ""});
++            } else {
++                // Name, path, and text_ref_path provided
++                std::string path = sample_def.substr(comma_pos + 1, second_comma_pos - comma_pos - 1);
++                std::string text_ref_path = sample_def.substr(second_comma_pos + 1);
++                sp.sample_voices.push_back({name, path, text_ref_path});
++            }
++        } else {
++                // Name, path, and text_ref_path provided
++                std::string path = sample_def.substr(comma_pos + 1, second_comma_pos - comma_pos - 1);
++                std::string text_ref_path = sample_def.substr(second_comma_pos + 1);
++                sp.sample_voices.push_back({name, path + "," + text_ref_path});
++            }
+         } else {
+             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
+             return false;
+@@ -439,6 +481,304 @@ int main(int argc, char ** argv) {
+     std::mutex voices_mutex;
+     int next_voice_id = 1;
+ 
++    // Load pre-defined voice samples from directory if specified
++    if (!sp.samples_dir.empty()) {
++        fprintf(stderr, "Loading pre-defined voice samples from: %s\n", sp.samples_dir.c_str());
++        namespace fs = std::filesystem;
++        if (fs::exists(sp.samples_dir) && fs::is_directory(sp.samples_dir)) {
++            for (const auto & entry : fs::directory_iterator(sp.samples_dir)) {
++                if (entry.is_regular_file() && entry.path().extension() == ".wav") {
++                    std::string wav_path = entry.path().string();
++                    std::string name = entry.path().filename().stem().string();
++                    
++                    // Skip files that don't have a valid name
++                    if (name.empty()) continue;
++                    
++                    // Look for corresponding text reference file (.txt or .md)
++                    std::string ref_text;
++                    std::string txt_path = wav_path.substr(0, wav_path.find_last_of('.')) + ".txt";
++                    std::string md_path = wav_path.substr(0, wav_path.find_last_of('.')) + ".md";
++                    
++                    // Check for .txt file first
++                    if (fs::exists(txt_path)) {
++                        std::ifstream file(txt_path);
++                        if (file.is_open()) {
++                            std::stringstream buffer;
++                            buffer << file.rdbuf();
++                            ref_text = buffer.str();
++                            file.close();
++                            fprintf(stderr, "  Found reference text: %s\n", txt_path.c_str());
++                        }
++                    } 
++                    // Check for .md file if no .txt
++                    else if (fs::exists(md_path)) {
++                        std::ifstream file(md_path);
++                        if (file.is_open()) {
++                            std::stringstream buffer;
++                            buffer << file.rdbuf();
++                            ref_text = buffer.str();
++                            file.close();
++                            fprintf(stderr, "  Found reference text: %s\n", md_path.c_str());
++                        }
++                    }
++                    
++                    // Create voice embedding from WAV file
++                    std::vector<float> embedding;
++                    bool ok;
++                    {
++                        std::lock_guard<std::mutex> lock(synth_mutex);
++                        ok = tts.extract_speaker_embedding(wav_path, embedding);
++                    }
++                    
++                    if (!ok) {
++                        fprintf(stderr, "Warning: Failed to extract embedding from %s\n", wav_path.c_str());
++                        continue;
++                    }
++                    
++                    // ICL mode: also encode reference audio to discrete speech codes
++                    std::vector<int32_t> ref_codes;
++                    int32_t n_ref_frames = 0;
++                    if (!ref_text.empty()) {
++                        std::vector<float> samples;
++                        int sample_rate = 0;
++                        if (!qwen3_tts::load_audio_file(wav_path, samples, sample_rate)) {
++                            fprintf(stderr, "Warning: Failed to load audio for codec encoding from %s\n", wav_path.c_str());
++                            continue;
++                        }
++
++                        // resample to 24kHz if needed
++                        if (sample_rate != 24000 && sample_rate > 0) {
++                            int64_t new_len = (int64_t)samples.size() * 24000 / sample_rate;
++                            std::vector<float> resampled(new_len);
++                            for (int64_t i = 0; i < new_len; i++) {
++                                float src = (float)i * sample_rate / 24000.0f;
++                                int idx = (int)src;
++                                float frac = src - idx;
++                                if (idx + 1 < (int)samples.size()) {
++                                    resampled[i] = samples[idx] * (1 - frac) + samples[idx + 1] * frac;
++                                } else {
++                                    resampled[i] = samples[std::min(idx, (int)samples.size() - 1)];
++                                }
++                            }
++                            samples = std::move(resampled);
++                        }
++
++                        bool codec_ok;
++                        {
++                            std::lock_guard<std::mutex> lock(synth_mutex);
++                            codec_ok = tts.encode_speech_codes(samples.data(),
++                                                                (int32_t)samples.size(),
++                                                                ref_codes, n_ref_frames);
++                        }
++                        if (!codec_ok) {
++                            fprintf(stderr, "Warning: Failed to encode speech codes for ICL from %s\n", wav_path.c_str());
++                            continue;
++                        }
++                        fprintf(stderr, "  Encoded %d reference frames for ICL voice cloning\n", n_ref_frames);
++                    }
++                    
++                    // Store the pre-defined voice
++                    std::lock_guard<std::mutex> lock(voices_mutex);
++                    voices[name] = {name, std::move(embedding), ref_text, std::move(ref_codes), n_ref_frames, wav_path};
++                    fprintf(stderr, "Loaded pre-defined voice: %s\n", name.c_str());
++                }
++            }
++        } else {
++            fprintf(stderr, "Warning: Voices directory not found or not a directory: %s\n", sp.samples_dir.c_str());
++        }
++    }
++
++// Load sample voices from command line arguments if specified
++    for (const auto & sample : sp.sample_voices) {
++        const std::string & name = sample.name;
++        const std::string & path = sample.path;
++        const std::string & text_ref_path = sample.text_ref_path;
++        
++        fprintf(stderr, "Loading sample voice: %s\n", name.c_str());
++        
++        // Parse path and optional ref_text path
++        std::string wav_path = path;
++        
++        fprintf(stderr, "  WAV file: %s\n", wav_path.c_str());
++        if (!text_ref_path.empty()) {
++            fprintf(stderr, "  Text ref file: %s\n", text_ref_path.c_str());
++        }
++        
++        // Check if file exists
++        namespace fs = std::filesystem;
++        if (!fs::exists(wav_path)) {
++            fprintf(stderr, "Warning: Sample voice file not found: %s\n", wav_path.c_str());
++            continue;
++        }
++        
++        // Create voice embedding from WAV file
++        std::vector<float> embedding;
++        bool ok;
++        {
++            std::lock_guard<std::mutex> lock(synth_mutex);
++            ok = tts.extract_speaker_embedding(wav_path, embedding);
++        }
++        
++        if (!ok) {
++            fprintf(stderr, "Warning: Failed to extract embedding from %s\n", wav_path.c_str());
++            continue;
++        }
++        
++        // Handle reference text - either from file or empty
++        std::string ref_text;
++        if (!text_ref_path.empty()) {
++            // Read reference text from file
++            std::ifstream file(text_ref_path);
++            if (file.is_open()) {
++                std::stringstream buffer;
++                buffer << file.rdbuf();
++                ref_text = buffer.str();
++                file.close();
++            } else {
++                fprintf(stderr, "Warning: Failed to open text reference file: %s\n", text_ref_path.c_str());
++            }
++        }
++        
++        // ICL mode: also encode reference audio to discrete speech codes
++        std::vector<int32_t> ref_codes;
++        int32_t n_ref_frames = 0;
++        if (!ref_text.empty()) {
++            std::vector<float> samples;
++            int sample_rate = 0;
++            if (!qwen3_tts::load_audio_file(wav_path, samples, sample_rate)) {
++                fprintf(stderr, "Warning: Failed to load audio for codec encoding from %s\n", wav_path.c_str());
++                continue;
++            }
++
++            // resample to 24kHz if needed
++            if (sample_rate != 24000 && sample_rate > 0) {
++                int64_t new_len = (int64_t)samples.size() * 24000 / sample_rate;
++                std::vector<float> resampled(new_len);
++                for (int64_t i = 0; i < new_len; i++) {
++                    float src = (float)i * sample_rate / 24000.0f;
++                    int idx = (int)src;
++                    float frac = src - idx;
++                    if (idx + 1 < (int)samples.size()) {
++                        resampled[i] = samples[idx] * (1 - frac) + samples[idx + 1] * frac;
++                    } else {
++                        resampled[i] = samples[std::min(idx, (int)samples.size() - 1)];
++                    }
++                }
++                samples = std::move(resampled);
++            }
++
++            bool codec_ok;
++            {
++                std::lock_guard<std::mutex> lock(synth_mutex);
++                codec_ok = tts.encode_speech_codes(samples.data(),
++                                                    (int32_t)samples.size(),
++                                                    ref_codes, n_ref_frames);
++            }
++            if (!codec_ok) {
++                fprintf(stderr, "Warning: Failed to encode speech codes for ICL from %s\n", wav_path.c_str());
++                continue;
++            }
++            fprintf(stderr, "  Encoded %d reference frames for ICL voice cloning\n", n_ref_frames);
++        }
++        
++        // Store the sample voice
++        std::lock_guard<std::mutex> lock(voices_mutex);
++        voices[name] = {name, std::move(embedding), ref_text, std::move(ref_codes), n_ref_frames, wav_path};
++        fprintf(stderr, "Loaded sample voice: %s\n", name.c_str());
++    }
++        
++        fprintf(stderr, "  WAV file: %s\n", wav_path.c_str());
++        if (!text_ref_path.empty()) {
++            fprintf(stderr, "  Text ref file: %s\n", text_ref_path.c_str());
++        }
++        
++        // Check if file exists
++        namespace fs = std::filesystem;
++        if (!fs::exists(wav_path)) {
++            fprintf(stderr, "Warning: Sample voice file not found: %s\n", wav_path.c_str());
++            continue;
++        }
++        
++        // Create voice embedding from WAV file
++        std::vector<float> embedding;
++        bool ok;
++        {
++            std::lock_guard<std::mutex> lock(synth_mutex);
++            ok = tts.extract_speaker_embedding(wav_path, embedding);
++        }
++        
++        if (!ok) {
++            fprintf(stderr, "Warning: Failed to extract embedding from %s\n", wav_path.c_str());
++            continue;
++        }
++        
++        // Handle reference text - either from file or hardcode for testing
++        std::string ref_text;
++        if (!text_ref_path.empty()) {
++            // Read reference text from file
++            std::ifstream file(text_ref_path);
++            if (file.is_open()) {
++                std::stringstream buffer;
++                buffer << file.rdbuf();
++                ref_text = buffer.str();
++                file.close();
++            } else {
++                fprintf(stderr, "Warning: Failed to open text reference file: %s\n", text_ref_path.c_str());
++            }
++        } else {
++            // For testing - hardcode a simple reference text
++            // In a real implementation, this would be derived from audio filename + .txt or .md
++            ref_text = "Hello, this is the reference";
++        }
++        
++        // ICL mode: also encode reference audio to discrete speech codes
++        std::vector<int32_t> ref_codes;
++        int32_t n_ref_frames = 0;
++        if (!ref_text.empty()) {
++            std::vector<float> samples;
++            int sample_rate = 0;
++            if (!qwen3_tts::load_audio_file(wav_path, samples, sample_rate)) {
++                fprintf(stderr, "Warning: Failed to load audio for codec encoding from %s\n", wav_path.c_str());
++                continue;
++            }
++
++            // resample to 24kHz if needed
++            if (sample_rate != 24000 && sample_rate > 0) {
++                int64_t new_len = (int64_t)samples.size() * 24000 / sample_rate;
++                std::vector<float> resampled(new_len);
++                for (int64_t i = 0; i < new_len; i++) {
++                    float src = (float)i * sample_rate / 24000.0f;
++                    int idx = (int)src;
++                    float frac = src - idx;
++                    if (idx + 1 < (int)samples.size()) {
++                        resampled[i] = samples[idx] * (1 - frac) + samples[idx + 1] * frac;
++                    } else {
++                        resampled[i] = samples[std::min(idx, (int)samples.size() - 1)];
++                    }
++                }
++                samples = std::move(resampled);
++            }
++
++            bool codec_ok;
++            {
++                std::lock_guard<std::mutex> lock(synth_mutex);
++                codec_ok = tts.encode_speech_codes(samples.data(),
++                                                    (int32_t)samples.size(),
++                                                    ref_codes, n_ref_frames);
++            }
++            if (!codec_ok) {
++                fprintf(stderr, "Warning: Failed to encode speech codes for ICL from %s\n", wav_path.c_str());
++                continue;
++            }
++            fprintf(stderr, "  Encoded %d reference frames for ICL voice cloning\n", n_ref_frames);
++        }
++        
++        // Store the sample voice
++        std::lock_guard<std::mutex> lock(voices_mutex);
++        voices[name] = {name, std::move(embedding), ref_text, std::move(ref_codes), n_ref_frames, wav_path};
++        fprintf(stderr, "Loaded sample voice: %s\n", name.c_str());
++    }
++
+     httplib::Server svr;
+ 
+     // log all requests
+@@ -625,12 +965,28 @@ int main(int argc, char ** argv) {
+         std::string voice_id;
+         {
+             std::lock_guard<std::mutex> lock(voices_mutex);
+-            voice_id = "voice_" + std::to_string(next_voice_id++);
+-            voices[voice_id] = {name, std::move(embedding), ref_text,
+-                                std::move(ref_codes), n_ref_frames};
++            // Check if voice with same name already exists - if so, use it
++            bool found = false;
++            for (const auto & pair : voices) {
++                if (pair.second.name == name) {
++                    voice_id = pair.first;
++                    found = true;
++                    // Update the existing voice with new embedding
++                    voices[voice_id] = {name, std::move(embedding), ref_text,
++                                        std::move(ref_codes), n_ref_frames};
++                    fprintf(stderr, "Updated existing voice: %s\n", name.c_str());
++                    break;
++                }
++            }
++            
++            if (!found) {
++                voice_id = "voice_" + std::to_string(next_voice_id++);
++                voices[voice_id] = {name, std::move(embedding), ref_text,
++                                    std::move(ref_codes), n_ref_frames};
++            }
+         }
+ 
+-        fprintf(stderr, "created voice '%s' (id: %s%s)\n", name.c_str(), voice_id.c_str(),
++        fprintf(stderr, "created/updated voice '%s' (id: %s%s)\n", name.c_str(), voice_id.c_str(),
+                 ref_text.empty() ? "" : ", ICL mode");
+         json resp = {{"id", voice_id}, {"name", name}};
+         if (!ref_text.empty()) {
