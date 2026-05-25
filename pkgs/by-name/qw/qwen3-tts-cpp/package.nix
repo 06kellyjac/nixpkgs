@@ -34,7 +34,8 @@ stdenv.mkDerivation (finalAttrs: {
   patches = [
     ./0001-local-deps.patch
     ./0002-use-updated-httplib.patch
-    ./0003-predefined-samples-server-icl4.patch
+    ./0003-predefined-samples-server-icl4.8.patch
+    # ./0003-predefined-samples-server-icl9.patch
   ];
 
   nativeBuildInputs = [

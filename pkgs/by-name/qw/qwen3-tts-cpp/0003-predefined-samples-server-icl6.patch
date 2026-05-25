@@ -1,0 +1,1020 @@
+diff --git a/main.cpp b/main.cpp
+index 7299e62..fc9affd 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -1,9 +1,13 @@
+ #include "qwen3_tts.h"
++#include "gguf_voice_bank_writer.h"
+ 
+ #include <cstdio>
+ #include <cstring>
+ #include <string>
+ #include <iostream> // Added for std::cin and std::getline
++#include <filesystem>
++#include <fstream>
++#include <sstream>
+ 
+ void print_usage(const char * program) {
+     fprintf(stderr, "Usage: %s [options] -m <model_dir>\n", program);
+@@ -16,6 +20,9 @@ void print_usage(const char * program) {
+     fprintf(stderr, "  -r, --reference <file> Reference audio for voice cloning\n");
+     fprintf(stderr, "  -s, --speaker <file>   Load precomputed speaker embedding (.spk)\n");
+     fprintf(stderr, "  --save-speaker <file>  Extract embedding from -r and save to file\n");
++    fprintf(stderr, "  --samples-dir <dir>    Directory with pre-defined custom voices (.wav files)\n");
++    fprintf(stderr, "  --sample <name,path[,ref_text_path]>  Define sample voice (can be used multiple times)\n");
++    fprintf(stderr, "  --output-gguf <file>   Output GGUF voice bank file\n");
+     fprintf(stderr, "  --temperature <val>    Sampling temperature (default: 0.9, 0=greedy)\n");
+     fprintf(stderr, "  --top-k <n>            Top-k sampling (default: 50, 0=disabled)\n");
+     fprintf(stderr, "  --top-p <val>          Top-p sampling (default: 1.0)\n");
+@@ -39,10 +46,20 @@ int main(int argc, char ** argv) {
+     std::string reference_audio;
+     std::string speaker_file;
+     std::string save_speaker_file;
++    std::string samples_dir;
++    std::string output_gguf_file;
+     bool interactive = false;
+     
+     qwen3_tts::tts_params params;
+     
++    // Sample voice definitions in format "name,path[,ref_text_path]"
++    struct sample_voice_def {
++        std::string name;
++        std::string path;
++        std::string ref_text_path;
++    };
++    std::vector<sample_voice_def> sample_voices;
++    
+     // Parse arguments
+     for (int i = 1; i < argc; i++) {
+         std::string arg = argv[i];
+@@ -88,6 +105,41 @@ int main(int argc, char ** argv) {
+                 return 1;
+             }
+             save_speaker_file = argv[i];
++        } else if (arg == "--samples-dir") {
++            if (++i >= argc) {
++                fprintf(stderr, "Error: missing samples directory\n");
++                return 1;
++            }
++            samples_dir = argv[i];
++        } else if (arg == "--sample") {
++            if (++i >= argc) {
++                fprintf(stderr, "Error: missing sample definition\n");
++                return 1;
++            }
++            std::string sample_def = argv[i];
++            size_t comma_pos = sample_def.find(',');
++            if (comma_pos == std::string::npos) {
++                fprintf(stderr, "Error: invalid sample format, expected 'name,path' or 'name,path,ref_text_path'\n");
++                return 1;
++            }
++            std::string name = sample_def.substr(0, comma_pos);
++            size_t second_comma_pos = sample_def.find(',', comma_pos + 1);
++            if (second_comma_pos == std::string::npos) {
++                // Only name and path provided
++                std::string path = sample_def.substr(comma_pos + 1);
++                sample_voices.push_back({name, path, ""});
++            } else {
++                // Name, path, and ref_text_path provided
++                std::string path = sample_def.substr(comma_pos + 1, second_comma_pos - comma_pos - 1);
++                std::string ref_text_path = sample_def.substr(second_comma_pos + 1);
++                sample_voices.push_back({name, path, ref_text_path});
++            }
++        } else if (arg == "--output-gguf") {
++            if (++i >= argc) {
++                fprintf(stderr, "Error: missing output GGUF file\n");
++                return 1;
++            }
++            output_gguf_file = argv[i];
+         } else if (arg == "--temperature") {
+             if (++i >= argc) {
+                 fprintf(stderr, "Error: missing temperature value\n");
+@@ -212,6 +264,14 @@ int main(int argc, char ** argv) {
+         fprintf(stderr, "Loaded precomputed speaker embedding from %s\n", speaker_file.c_str());
+     }
+ 
++    // Check if we're just creating a GGUF voice bank
++    if ((!samples_dir.empty() || !sample_voices.empty()) && !output_gguf_file.empty()) {
++        fprintf(stderr, "Creating GGUF voice bank: %s\n", output_gguf_file.c_str());
++        fprintf(stderr, "Note: Main implementation of voice processing is not complete in this version.\n");
++        fprintf(stderr, "Use server.cpp or other tools for full voice bank creation functionality.\n");
++        return 0;
++    }
++
+     // Set progress callback
+     tts.set_progress_callback([](int tokens, int max_tokens) {
+         fprintf(stderr, "\rGenerating: %d/%d tokens", tokens, max_tokens);
+diff --git a/src/gguf_voice_bank_loader.cpp b/src/gguf_voice_bank_loader.cpp
+new file mode 100644
+index 0000000..c6d1a0c
+--- /dev/null
++++ b/src/gguf_voice_bank_loader.cpp
+@@ -0,0 +1,112 @@
++#include "voice_bank.h"
++#include "gguf.h"
++#include "ggml.h"
++
++#include <stdexcept>
++#include <cstring>
++
++namespace qwen3_tts {
++
++// ---------------------------------------------------------------------
++// Load entry
++// ---------------------------------------------------------------------
++
++void VoiceBank::load_v1(gguf_context* ctx) {
++
++    const uint32_t count =
++        gguf_get_val_u32(ctx, gguf_find_key(ctx, "voice.count"));
++
++    voices_.resize(count);
++    index_by_name_.reserve(count);
++
++    for (uint32_t i = 0; i < count; ++i) {
++
++        auto& v = voices_[i];
++
++        // ---------------- metadata ----------------
++
++        std::string prefix = "voice." + std::to_string(i) + ".";
++
++        v.name =
++            gguf_get_val_str(ctx, gguf_find_key(ctx, (prefix + "name").c_str()));
++
++        v.n_ref_frames =
++            gguf_get_val_u32(ctx, gguf_find_key(ctx, (prefix + "n_ref_frames").c_str()));
++
++        v.n_ref_codebooks =
++            gguf_get_val_u32(ctx, gguf_find_key(ctx, (prefix + "n_ref_codebooks").c_str()));
++
++        v.ref_audio_sha256 =
++            gguf_get_val_str(ctx, gguf_find_key(ctx, (prefix + "ref_audio_sha256").c_str()));
++
++        v.ref_text =
++            gguf_get_val_str(ctx, gguf_find_key(ctx, (prefix + "ref_text").c_str()));
++
++        // ---------------- embedding ----------------
++
++        int emb_i = gguf_find_tensor(ctx, (prefix + "embedding").c_str());
++        const ggml_tensor* emb = gguf_get_tensor(ctx, emb_i);
++
++        v.embedding = (const float*) emb->data;
++        v.embedding_dim = ggml_nelements(emb);
++
++        // ---------------- ref codes ----------------
++
++        int rc_i = gguf_find_tensor(ctx, (prefix + "ref_codes").c_str());
++        const ggml_tensor* rc = gguf_get_tensor(ctx, rc_i);
++
++        v.ref_codes = (const uint16_t*) rc->data;
++        v.ref_code_count = ggml_nelements(rc);
++
++        // ---------------- index ----------------
++
++        index_by_name_[v.name] = i;
++    }
++}
++
++// ---------------------------------------------------------------------
++// Public load
++// ---------------------------------------------------------------------
++
++bool VoiceBank::loadFromFile(const std::string& path) {
++
++    gguf_init_params params{};
++    params.no_alloc = false;
++
++    ctx_ = gguf_init_from_file(path.c_str(), params);
++
++    if (!ctx_) return false;
++
++    uint32_t version =
++        gguf_get_val_u32(ctx_, gguf_find_key(ctx_, "voice.schema_version"));
++
++    if (version != 1) {
++        throw std::runtime_error("Unsupported voice bank schema version");
++    }
++
++    load_v1(ctx_);
++
++    return true;
++}
++
++// ---------------------------------------------------------------------
++// Lookup
++// ---------------------------------------------------------------------
++
++const VoiceEntry*
++VoiceBank::getVoice(const std::string& name) const {
++
++    auto it = index_by_name_.find(name);
++    if (it == index_by_name_.end()) return nullptr;
++
++    return &voices_[it->second];
++}
++
++const VoiceEntry*
++VoiceBank::getVoice(size_t index) const {
++
++    if (index >= voices_.size()) return nullptr;
++    return &voices_[index];
++}
++
++} // namespace qwen3_tts
+diff --git a/src/gguf_voice_bank_loader.h b/src/gguf_voice_bank_loader.h
+new file mode 100644
+index 0000000..cbb787b
+--- /dev/null
++++ b/src/gguf_voice_bank_loader.h
+@@ -0,0 +1,51 @@
++#pragma once
++
++#include <string>
++#include <vector>
++#include <unordered_map>
++#include <memory>
++#include <cstdint>
++
++struct gguf_context;
++struct ggml_tensor;
++
++namespace qwen3_tts {
++
++struct GGUFVoiceEntry {
++    std::string name;
++
++    uint32_t n_ref_frames = 0;
++    uint32_t n_ref_codebooks = 0;
++    uint32_t embedding_dim = 0;
++
++    std::string ref_text;
++    std::string ref_audio_sha256;
++
++    const float* embedding = nullptr;
++    const uint16_t* ref_codes = nullptr;
++
++    size_t ref_code_count = 0;
++};
++
++class GGUFVoiceBank {
++public:
++    GGUFVoiceBank() = default;
++
++    bool loadFromFile(const std::string& path);
++
++    const GGUFVoiceEntry* getVoice(const std::string& name) const;
++    const GGUFVoiceEntry* getVoice(size_t index) const;
++
++    size_t size() const { return voices_.size(); }
++
++private:
++    std::vector<GGUFVoiceEntry> voices_;
++    std::unordered_map<std::string, size_t> index_by_name_;
++
++    gguf_context* ctx_ = nullptr; // must outlive tensor pointers
++
++private:
++    void load_v1(gguf_context* ctx);
++};
++
++} // namespace qwen3_tts
+diff --git a/src/gguf_voice_bank_writer.cpp b/src/gguf_voice_bank_writer.cpp
+new file mode 100644
+index 0000000..37d1f4f
+--- /dev/null
++++ b/src/gguf_voice_bank_writer.cpp
+@@ -0,0 +1,157 @@
++#include "voice_bank_writer.h"
++
++#include "gguf.h"
++#include "ggml.h"
++
++#include <stdexcept>
++#include <cstring>
++
++namespace qwen3_tts {
++
++// ---------------------------------------------------------------------
++// Constructor
++// ---------------------------------------------------------------------
++
++VoiceBankWriter::VoiceBankWriter() = default;
++
++// ---------------------------------------------------------------------
++// Add voice
++// ---------------------------------------------------------------------
++
++void VoiceBankWriter::addVoice(const VoiceBankEntryBuilder& voice) {
++    voices_.push_back(voice);
++}
++
++// ---------------------------------------------------------------------
++// Validation
++// ---------------------------------------------------------------------
++
++void VoiceBankWriter::validate() const {
++
++    if (voices_.empty()) {
++        throw std::runtime_error("VoiceBankWriter: no voices added");
++    }
++
++    for (const auto& v : voices_) {
++
++        if (v.name.empty()) {
++            throw std::runtime_error("Voice has empty name");
++        }
++
++        if (v.embedding.empty()) {
++            throw std::runtime_error("Voice missing embedding");
++        }
++
++        if (!v.ref_codes.empty()) {
++
++            size_t expected =
++                static_cast<size_t>(v.n_ref_frames) *
++                static_cast<size_t>(v.n_ref_codebooks);
++
++            if (expected != v.ref_codes.size()) {
++                throw std::runtime_error(
++                    "ref_codes size mismatch for voice: " + v.name);
++            }
++        }
++    }
++}
++
++// ---------------------------------------------------------------------
++// Write GGUF
++// ---------------------------------------------------------------------
++
++bool VoiceBankWriter::writeToFile(const std::string& path) {
++
++    validate();
++
++    gguf_context* ctx = gguf_init_empty();
++    ggml_context* gctx = nullptr;
++
++    // -------------------------------------------------------------
++    // Global metadata
++    // -------------------------------------------------------------
++
++    gguf_set_val_u32(ctx, "voice.schema_version", schema_version_);
++    gguf_set_val_u32(ctx, "voice.count", (uint32_t)voices_.size());
++
++    // -------------------------------------------------------------
++    // Tensor context
++    // -------------------------------------------------------------
++
++    ggml_init_params params{};
++    params.mem_size = 64ull * 1024ull * 1024ull;
++    params.no_alloc = false;
++
++    gctx = ggml_init(params);
++
++    // -------------------------------------------------------------
++    // Write voices
++    // -------------------------------------------------------------
++
++    for (size_t i = 0; i < voices_.size(); ++i) {
++
++        const auto& v = voices_[i];
++
++        std::string p = "voice." + std::to_string(i) + ".";
++
++        // ---------------- metadata ----------------
++
++        gguf_set_val_str(ctx, (p + "name").c_str(), v.name.c_str());
++
++        gguf_set_val_u32(ctx, (p + "n_ref_frames").c_str(), v.n_ref_frames);
++
++        gguf_set_val_u32(ctx, (p + "n_ref_codebooks").c_str(), v.n_ref_codebooks);
++
++        gguf_set_val_str(ctx, (p + "ref_text").c_str(), v.ref_text.c_str());
++
++        gguf_set_val_str(ctx, (p + "ref_audio_sha256").c_str(), v.ref_audio_sha256.c_str());
++
++        // ---------------- embedding tensor ----------------
++
++        ggml_tensor* emb =
++            ggml_new_tensor_1d(
++                gctx,
++                GGML_TYPE_F32,
++                v.embedding.size());
++
++        std::memcpy(
++            emb->data,
++            v.embedding.data(),
++            v.embedding.size() * sizeof(float));
++
++        ggml_set_name(emb, (p + "embedding").c_str());
++        gguf_add_tensor(ctx, emb);
++
++        // ---------------- ref codes (uint16 compressed) ----------------
++
++        if (!v.ref_codes.empty()) {
++
++            ggml_tensor* rc =
++                ggml_new_tensor_1d(
++                    gctx,
++                    GGML_TYPE_U16,
++                    v.ref_codes.size());
++
++            std::memcpy(
++                rc->data,
++                v.ref_codes.data(),
++                v.ref_codes.size() * sizeof(uint16_t));
++
++            ggml_set_name(rc, (p + "ref_codes").c_str());
++            gguf_add_tensor(ctx, rc);
++        }
++    }
++
++    // -------------------------------------------------------------
++    // Write file
++    // -------------------------------------------------------------
++
++    bool ok = gguf_write_to_file(ctx, path.c_str(), false);
++
++    gguf_free(ctx);
++    ggml_free(gctx);
++
++    return ok;
++}
++
++} // namespace qwen3_tts
+diff --git a/src/gguf_voice_bank_writer.h b/src/gguf_voice_bank_writer.h
+new file mode 100644
+index 0000000..628f2ca
+--- /dev/null
++++ b/src/gguf_voice_bank_writer.h
+@@ -0,0 +1,41 @@
++#pragma once
++
++#include <string>
++#include <vector>
++#include <cstdint>
++
++namespace qwen3_tts {
++
++struct GGUFVoiceBankEntryBuilder {
++    std::string name;
++
++    std::vector<float> embedding;
++
++    std::vector<uint16_t> ref_codes;
++
++    uint32_t n_ref_frames = 0;
++    uint32_t n_ref_codebooks = 0;
++
++    std::string ref_text;
++    std::string ref_audio_sha256;
++};
++
++class GGUFVoiceBankWriter {
++public:
++    GGUFVoiceBankWriter();
++
++    void addVoice(const GGUFVoiceBankEntryBuilder& voice);
++
++    void setSchemaVersion(uint32_t v) { schema_version_ = v; }
++
++    bool writeToFile(const std::string& path);
++
++private:
++    std::vector<GGUFVoiceBankEntryBuilder> voices_;
++    uint32_t schema_version_ = 1;
++
++private:
++    void validate() const;
++};
++
++} // namespace qwen3_tts
+diff --git a/src/server.cpp b/src/server.cpp
+index 2f32986..4b3ca1f 100644
+--- a/src/server.cpp
++++ b/src/server.cpp
+@@ -10,6 +10,7 @@
+ //   POST /v1/audio/speech     - synthesize speech (supports voice cloning)
+ 
+ #include "qwen3_tts.h"
++#include "gguf_voice_bank_loader.h"
+ 
+ #include <httplib.h>
+ #include <nlohmann/json.hpp>
+@@ -17,11 +18,15 @@
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
++#include <filesystem>
++#include <fstream>
+ #include <map>
+ #include <mutex>
+ #include <string>
+ #include <vector>
+ #include <unistd.h>
++#include <sys/types.h>
++#include <sys/stat.h>
+ 
+ using json = nlohmann::json;
+ using namespace qwen3_tts;
+@@ -229,6 +234,8 @@ struct custom_voice {
+     std::string ref_text;
+     std::vector<int32_t> ref_codes;
+     int32_t n_ref_frames = 0;
++    // Path to the reference wav file (if loaded from disk)
++    std::string wav_path;
+ };
+ 
+ struct server_params {
+@@ -246,6 +253,19 @@ struct server_params {
+     int         top_k              = 50;
+     float       repetition_penalty = 1.05f;
+     int64_t     seed               = -1;
++    // Directory for pre-defined custom voices
++    std::string samples_dir;
++    // Directory for caching voice embeddings as GGUF files
++    std::string cache_dir = "./voices_cache";
++    // GGUF voice bank file
++    std::string voices_file;
++    // Sample voice definitions in format "name,path[,ref_text_path]"
++    struct sample_voice_def {
++        std::string name;
++        std::string path;
++        std::string ref_text_path;
++    };
++    std::vector<sample_voice_def> sample_voices;
+ };
+ 
+ // download a file from a huggingface repo, returns local cache path
+@@ -316,21 +336,24 @@ static void print_usage(const char * program) {
+     fprintf(stderr, "usage: %s [options] (-m <model.gguf> | -hf <repo:quant>)\n", program);
+     fprintf(stderr, "\n");
+     fprintf(stderr, "options:\n");
+-    fprintf(stderr, "  -m,  --model <file>             TTS model GGUF file\n");
+-    fprintf(stderr, "  -v,  --vocoder <file>           vocoder GGUF file (default: same dir as model)\n");
+-    fprintf(stderr, "  -hf, --hf-repo <repo[:quant]>   HuggingFace model repo (default quant: Q8_0)\n");
+-    fprintf(stderr, "       --hf-file <file>            override GGUF filename within --hf-repo\n");
+-    fprintf(stderr, "       --hf-repo-v <repo[:quant]>  HuggingFace vocoder repo\n");
+-    fprintf(stderr, "       --hf-file-v <file>          override GGUF filename within --hf-repo-v\n");
+-    fprintf(stderr, "  -H,  --host <host>              listen host (default: 127.0.0.1)\n");
+-    fprintf(stderr, "  -p,  --port <port>              listen port (default: 8080)\n");
+-    fprintf(stderr, "  -j,  --threads <n>              compute threads (default: 4)\n");
+-    fprintf(stderr, "  -V,  --verbose                  print per-stage progress and timing\n");
+-    fprintf(stderr, "       --temperature <f>           sampling temperature default (default: 0.9)\n");
+-    fprintf(stderr, "       --top-k <n>                 top-k sampling default (default: 50)\n");
+-    fprintf(stderr, "       --repetition-penalty <f>    repetition penalty default (default: 1.05)\n");
+-    fprintf(stderr, "       --seed <n>                  default sampling seed (default: -1 = random)\n");
+-    fprintf(stderr, "  -h,  --help                     show this help\n");
++    fprintf(stderr, "  -m,  --model <file>                        TTS model GGUF file\n");
++    fprintf(stderr, "  -v,  --vocoder <file>                      vocoder GGUF file (default: same dir as model)\n");
++    fprintf(stderr, "  -hf, --hf-repo <repo[:quant]>              HuggingFace model repo (default quant: Q8_0)\n");
++    fprintf(stderr, "       --hf-file <file>                      override GGUF filename within --hf-repo\n");
++    fprintf(stderr, "       --hf-repo-v <repo[:quant]>            HuggingFace vocoder repo\n");
++    fprintf(stderr, "       --hf-file-v <file>                    override GGUF filename within --hf-repo-v\n");
++    fprintf(stderr, "  -H,  --host <host>                         listen host (default: 127.0.0.1)\n");
++    fprintf(stderr, "  -p,  --port <port>                         listen port (default: 8080)\n");
++    fprintf(stderr, "  -j,  --threads <n>                         compute threads (default: 4)\n");
++    fprintf(stderr, "  -V,  --verbose                             print per-stage progress and timing\n");
++    fprintf(stderr, "       --temperature <f>                     sampling temperature default (default: 0.9)\n");
++    fprintf(stderr, "       --top-k <n>                           top-k sampling default (default: 50)\n");
++    fprintf(stderr, "       --repetition-penalty <f>              repetition penalty default (default: 1.05)\n");
++    fprintf(stderr, "       --seed <n>                            default sampling seed (default: -1 = random)\n");
++    fprintf(stderr, "       --voices <file>                       GGUF voice bank file\n");
++    fprintf(stderr, "       --samples-dir <dir>                   directory with pre-defined custom voices (.wav files)\n");
++    fprintf(stderr, "       --cache-dir <dir>                     directory for caching voice embeddings (default: voices_cache)\n");
++    fprintf(stderr, "  -h,  --help                                show this help\n");
+ }
+ 
+ static bool parse_args(int argc, char ** argv, server_params & sp) {
+@@ -380,6 +403,35 @@ static bool parse_args(int argc, char ** argv, server_params & sp) {
+         } else if (arg == "--seed") {
+             if (++i >= argc) { fprintf(stderr, "error: missing seed\n"); return false; }
+             sp.seed = std::stoll(argv[i]);
++        } else if (arg == "--cache-dir") {
++            if (++i >= argc) { fprintf(stderr, "error: missing cache directory\n"); return false; }
++            sp.cache_dir = argv[i];
++        } else if (arg == "--voices") {
++            if (++i >= argc) { fprintf(stderr, "error: missing voices file\n"); return false; }
++            sp.voices_file = argv[i];
++        } else if (arg == "--samples-dir") {
++            if (++i >= argc) { fprintf(stderr, "error: missing samples directory\n"); return false; }
++            sp.samples_dir = argv[i];
++        } else if (arg == "--sample") {
++            if (++i >= argc) { fprintf(stderr, "error: missing sample definition\n"); return false; }
++            std::string sample_def = argv[i];
++            size_t comma_pos = sample_def.find(',');
++            if (comma_pos == std::string::npos) {
++                fprintf(stderr, "error: invalid sample format, expected 'name,path' or 'name,path,ref_text_path'\n");
++                return false;
++            }
++            std::string name = sample_def.substr(0, comma_pos);
++            size_t second_comma_pos = sample_def.find(',', comma_pos + 1);
++            if (second_comma_pos == std::string::npos) {
++                // Only name and path provided
++                std::string path = sample_def.substr(comma_pos + 1);
++                sp.sample_voices.push_back({name, path, ""});
++            } else {
++                // Name, path, and ref_text_path provided
++                std::string path = sample_def.substr(comma_pos + 1, second_comma_pos - comma_pos - 1);
++                std::string ref_text_path = sample_def.substr(second_comma_pos + 1);
++                sp.sample_voices.push_back({name, path, ref_text_path});
++            }
+         } else {
+             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
+             return false;
+@@ -439,6 +491,283 @@ int main(int argc, char ** argv) {
+     std::mutex voices_mutex;
+     int next_voice_id = 1;
+ 
++    // Helper function to process a single voice sample
++static void load_voice_sample(const server_params & sp, const std::string & name, const std::string & wav_path,
++                              const std::string & ref_text_path, Qwen3TTS & tts,
++                              std::mutex & synth_mutex, std::map<std::string, custom_voice> & voices,
++                              std::mutex & voices_mutex) {
++    fprintf(stderr, "[VOICE] Loading voice: %s\n", name.c_str());
++    
++    // Check if file exists
++    namespace fs = std::filesystem;
++    if (!fs::exists(wav_path)) {
++        fprintf(stderr, "  [VOICE] Warning: Voice file not found: %s\n", wav_path.c_str());
++        return;
++    }
++    
++    fprintf(stderr, "  [VOICE] WAV file: %s\n", wav_path.c_str());
++    if (!ref_text_path.empty()) {
++        fprintf(stderr, "  [VOICE] Text ref file: %s\n", ref_text_path.c_str());
++    }
++    
++    // Create path for cached embedding (if cache dir is set)
++    std::string cache_file;
++    bool use_cached = false;
++    std::vector<float> embedding;
++        // Handle reference text - either from file or empty
++    std::string ref_text;
++    
++    // ICL mode: also encode reference audio to discrete speech codes
++    std::vector<int32_t> ref_codes;
++    int32_t n_ref_frames = 0;
++    
++    if (!sp.cache_dir.empty()) {
++        // Create cache directory if it doesn't exist
++        if (!fs::exists(sp.cache_dir)) {
++            fs::create_directories(sp.cache_dir);
++        }
++        
++        cache_file = sp.cache_dir + "/" + name + ".gguf";
++        
++        // Check if we have a cached embedding
++        if (fs::exists(cache_file)) {
++            SpeakerEmbeddingGGUF speaker;
++            // Try to load from cache
++            if (!speaker.load(cache_file)) {
++                std::cerr << "load failed: "
++                        << speaker.get_error()
++                        << "\n";
++            } else {
++                fprintf(stderr, "  [VOICE] Loaded cached embedding for voice: %s\n", name.c_str());
++                embedding = speaker.get_text_ref();
++                ref_text = speaker.get_text_ref();
++                ref_text = speaker.get_ref_codes();
++                ref_text = speaker.get_text_ref();
++                use_cached = true;
++            }
++        }
++    }
++
++    // If no cached embedding, compute it
++    if (!use_cached) {
++        if (!ref_text_path.empty()) {
++            // Read reference text from file
++            std::ifstream file(ref_text_path);
++            if (file.is_open()) {
++                std::stringstream buffer;
++                buffer << file.rdbuf();
++                ref_text = buffer.str();
++                file.close();
++            } else {
++                fprintf(stderr, "  [VOICE] Warning: Failed to open text reference file: %s\n", ref_text_path.c_str());
++            }
++        }
++
++        if (!ref_text.empty()) {
++            std::vector<float> samples;
++            int sample_rate = 0;
++            if (!qwen3_tts::load_audio_file(wav_path, samples, sample_rate)) {
++                fprintf(stderr, "  [VOICE] Warning: Failed to load audio for codec encoding from %s\n", wav_path.c_str());
++                return;
++            }
++
++            // resample to 24kHz if needed
++            if (sample_rate != 24000 && sample_rate > 0) {
++                int64_t new_len = (int64_t)samples.size() * 24000 / sample_rate;
++                std::vector<float> resampled(new_len);
++                for (int64_t i = 0; i < new_len; i++) {
++                    float src = (float)i * sample_rate / 24000.0f;
++                    int idx = (int)src;
++                    float frac = src - idx;
++                    if (idx + 1 < (int)samples.size()) {
++                        resampled[i] = samples[idx] * (1 - frac) + samples[idx + 1] * frac;
++                    } else {
++                        resampled[i] = samples[std::min(idx, (int)samples.size() - 1)];
++                    }
++                }
++                samples = std::move(resampled);
++            }
++
++            bool codec_ok;
++            {
++                std::lock_guard<std::mutex> lock(synth_mutex);
++                codec_ok = tts.encode_speech_codes(samples.data(),
++                                                    (int32_t)samples.size(),
++                                                    ref_codes, n_ref_frames);
++            }
++            if (!codec_ok) {
++                fprintf(stderr, "  [VOICE] Warning: Failed to encode speech codes for ICL from %s\n", wav_path.c_str());
++                return;
++            }
++            fprintf(stderr, "  [VOICE] Encoded %d reference frames for ICL voice cloning\n", n_ref_frames);
++        }
++
++        bool ok;
++        {
++            std::lock_guard<std::mutex> lock(synth_mutex);
++            ok = tts.extract_speaker_embedding(wav_path, embedding);
++        }
++        
++        if (!ok) {
++            fprintf(stderr, "Warning: Failed to extract embedding from %s\n", wav_path.c_str());
++            return;
++        }
++
++
++        VoiceBankWriter writer;
++        VoiceBankEntryBuilder vbeb;
++        vbeb.name = "amy";
++
++        vbeb.embedding = {
++            0.1f, 0.2f, -0.3f, 0.4f
++        };
++
++        vbeb.ref_codes = ref_codes
++        vbeb.n_ref_frames = n_ref_frames;
++        vbeb.n_ref_codebooks = 16;
++        vbeb.ref_text = ref_text;
++        vbeb.ref_audio_sha256 = "abc123";
++
++        writer.addVoice(amy);
++
++        writer.writeToFile("voices.gguf");
++
++        GGUFSpeakerProfile gsp;
++
++        gsp.set_speaker_name(name);
++
++        // hardcode for now
++        gsp.set_model_name("qwen3-tts-1.7b-base");
++
++        gsp.set_text_ref(text_ref);
++        
++        gsp.set_ref_codes(ref_codes)
++
++        gsp.set_embedding(embedding);
++
++        if (!gsp.save(cache_file)) {
++            std::cerr << "save failed: "
++                      << gsp.get_error()
++                      << "\n";
++        } else {
++            fprintf(stderr, "  [VOICE] Saved speaker profile to: %s\n", cache_file.c_str());
++        }
++    }
++    
++    // Store the sample voice
++    std::lock_guard<std::mutex> lock(voices_mutex);
++    voices[name] = {name, std::move(embedding), ref_text, std::move(ref_codes), n_ref_frames, wav_path};
++    fprintf(stderr, "  [VOICE] Loaded voice: %s\n", name.c_str());
++}
++
++// Load pre-defined voice samples from directory if specified
++    if (!sp.samples_dir.empty()) {
++        fprintf(stderr, "[VOICE] Loading pre-defined voice samples from: %s\n", sp.samples_dir.c_str());
++        namespace fs = std::filesystem;
++        if (fs::exists(sp.samples_dir) && fs::is_directory(sp.samples_dir)) {
++            // Create cache directory if it doesn't exist
++            if (!fs::exists(sp.cache_dir)) {
++                fs::create_directories(sp.cache_dir);
++            }
++            
++            for (const auto & entry : fs::directory_iterator(sp.samples_dir)) {
++                if (entry.is_regular_file() && entry.path().extension() == ".wav") {
++                    std::string wav_path = entry.path().string();
++                    std::string name = entry.path().filename().stem().string();
++                    
++                    // Skip files that don't have a valid name
++                    if (name.empty()) continue;
++                    fprintf(stderr, "  [VOICE] Found voice sample: %s\n", name.c_str());
++                    
++                    // Look for corresponding text reference file (.txt or .md)
++                    std::string ref_text;
++                    std::string txt_path = wav_path.substr(0, wav_path.find_last_of('.')) + ".txt";
++                    std::string md_path = wav_path.substr(0, wav_path.find_last_of('.')) + ".md";
++                    
++                    // Check for .txt file first
++                    if (fs::exists(txt_path)) {
++                        std::ifstream file(txt_path);
++                        if (file.is_open()) {
++                            std::stringstream buffer;
++                            buffer << file.rdbuf();
++                            ref_text = buffer.str();
++                            file.close();
++                            fprintf(stderr, "  [VOICE] Found reference text: %s\n", txt_path.c_str());
++                        }
++                    } 
++                    // Check for .md file if no .txt
++                    else if (fs::exists(md_path)) {
++                        std::ifstream file(md_path);
++                        if (file.is_open()) {
++                            std::stringstream buffer;
++                            buffer << file.rdbuf();
++                            ref_text = buffer.str();
++                            file.close();
++                            fprintf(stderr, "  [VOICE] Found reference text: %s\n", md_path.c_str());
++                        }
++                    }
++                    
++                    // Load voice from directory with empty ref_text_path
++                    load_voice_sample(sp, name, wav_path, ref_text, tts, synth_mutex, voices, voices_mutex);
++                }
++            }
++        } else {
++            fprintf(stderr, "[VOICE] Warning: Voices directory not found or not a directory: %s\n", sp.samples_dir.c_str());
++        }
++    }
++
++    // Load sample voices from command line arguments if specified
++    for (const auto & sample : sp.sample_voices) {
++        const std::string & name = sample.name;
++        const std::string & path = sample.path;
++        const std::string & ref_text_path = sample.ref_text_path;
++        
++        // Load voice from command-line argument
++        load_voice_sample(sp, name, path, ref_text_path, tts, synth_mutex, voices, voices_mutex);
++    }
++
++    // Load GGUF voice bank if specified
++    if (!sp.voices_file.empty()) {
++        fprintf(stderr, "[VOICE] Loading GGUF voice bank: %s\n", sp.voices_file.c_str());
++        
++        // Try to load the GGUF voice bank file
++        try {
++            qwen3_tts::VoiceBank voice_bank;
++            if (voice_bank.loadFromFile(sp.voices_file)) {
++                fprintf(stderr, "  [VOICE] Loaded %zu voices from GGUF voice bank\n", voice_bank.getVoiceCount());
++                
++                // Add each voice to our voices map
++                for (size_t i = 0; i < voice_bank.getVoiceCount(); ++i) {
++                    const qwen3_tts::VoiceEntry* entry = voice_bank.getVoice(i);
++                    if (entry) {
++                        std::string name = entry->name;
++                        
++                        // Create a custom_voice entry
++                        custom_voice cv;
++                        cv.name = name;
++                        cv.embedding = std::vector<float>(entry->embedding, entry->embedding + entry->embedding_dim);
++                        cv.ref_text = entry->ref_text;
++                        cv.ref_codes = std::vector<int32_t>(entry->ref_codes, entry->ref_codes + entry->ref_code_count);
++                        cv.n_ref_frames = entry->n_ref_frames;
++                        cv.wav_path = ""; // Not applicable for GGUF-loaded voices
++                        
++                        // Store in our voices map
++                        {
++                            std::lock_guard<std::mutex> lock(voices_mutex);
++                            voices[name] = cv;
++                        }
++                        
++                        fprintf(stderr, "  [VOICE] Added voice: %s\n", name.c_str());
++                    }
++                }
++            } else {
++                fprintf(stderr, "  [VOICE] Failed to load GGUF voice bank file: %s\n", sp.voices_file.c_str());
++            }
++        } catch (const std::exception& e) {
++            fprintf(stderr, "  [VOICE] Error loading GGUF voice bank: %s\n", e.what());
++        }
++    }
++
+     httplib::Server svr;
+ 
+     // log all requests
+@@ -616,7 +945,7 @@ int main(int argc, char ** argv) {
+                 res.set_content(err.dump(), "application/json");
+                 return;
+             }
+-            fprintf(stderr, "encoded %d reference frames for ICL voice cloning\n", n_ref_frames);
++            fprintf(stderr, "  [VOICE] encoded %d reference frames for ICL voice cloning\n", n_ref_frames);
+         }
+ 
+         unlink(tmppath);
+@@ -625,12 +954,28 @@ int main(int argc, char ** argv) {
+         std::string voice_id;
+         {
+             std::lock_guard<std::mutex> lock(voices_mutex);
+-            voice_id = "voice_" + std::to_string(next_voice_id++);
+-            voices[voice_id] = {name, std::move(embedding), ref_text,
+-                                std::move(ref_codes), n_ref_frames};
++            // Check if voice with same name already exists - if so, use it
++            bool found = false;
++            for (const auto & pair : voices) {
++                if (pair.second.name == name) {
++                    voice_id = pair.first;
++                    found = true;
++                    // Update the existing voice with new embedding
++                    voices[voice_id] = {name, std::move(embedding), ref_text,
++                                        std::move(ref_codes), n_ref_frames};
++                    fprintf(stderr, "Updated existing voice: %s\n", name.c_str());
++                    break;
++                }
++            }
++            
++            if (!found) {
++                voice_id = "voice_" + std::to_string(next_voice_id++);
++                voices[voice_id] = {name, std::move(embedding), ref_text,
++                                    std::move(ref_codes), n_ref_frames};
++            }
+         }
+ 
+-        fprintf(stderr, "created voice '%s' (id: %s%s)\n", name.c_str(), voice_id.c_str(),
++        fprintf(stderr, "  [VOICE] created/updated voice '%s' (id: %s%s)\n", name.c_str(), voice_id.c_str(),
+                 ref_text.empty() ? "" : ", ICL mode");
+         json resp = {{"id", voice_id}, {"name", name}};
+         if (!ref_text.empty()) {
+@@ -657,8 +1002,10 @@ int main(int argc, char ** argv) {
+     // --- POST /v1/audio/speech ---
+     svr.Post("/v1/audio/speech",
+         [&tts, &synth_mutex, &sp, &voices, &voices_mutex](const httplib::Request & req, httplib::Response & res) {
++        fprintf(stderr, "[TTS] New TTS request received\n");
+ 
+         // parse request body
++        fprintf(stderr, "[TTS] Parsing request body\n");
+         json body;
+         try {
+             body = json::parse(req.body);
+@@ -699,7 +1046,7 @@ int main(int argc, char ** argv) {
+         if (stream_batch_size < 0) stream_batch_size = 0;
+         if (stream_batch_size > 256) stream_batch_size = 256;
+ 
+-        fprintf(stderr, "request: voice=%s lang=%s fmt=%s temp=%.2f seed=%lld len=%zu\n",
++        fprintf(stderr, "[TTS] request: voice=%s lang=%s fmt=%s temp=%.2f seed=%lld len=%zu\n",
+                 voice.empty() ? "default" : voice.c_str(),
+                 language.c_str(), response_format.c_str(),
+                 temperature, (long long)seed, input.size());
+@@ -871,20 +1218,25 @@ int main(int argc, char ** argv) {
+         }
+ 
+         // synthesize (serialized), using voice embedding if provided
++        fprintf(stderr, "[TTS] Starting synthesis process\n");
+         tts_result result;
+         {
+             std::lock_guard<std::mutex> lock(synth_mutex);
+             if (!voice_ref_codes.empty()) {
++                fprintf(stderr, "[TTS] Using ICL mode with %d reference frames\n", voice_n_ref_frames);
+                 result = tts.synthesize_with_embedding(
+                     input, voice_embedding.data(), (int32_t)voice_embedding.size(), params,
+                     voice_ref_codes.data(), voice_n_ref_frames);
+             } else if (!voice_embedding.empty()) {
++                fprintf(stderr, "[TTS] Using voice embedding mode\n");
+                 result = tts.synthesize_with_embedding(
+                     input, voice_embedding.data(), (int32_t)voice_embedding.size(), params);
+             } else {
++                fprintf(stderr, "[TTS] Using default synthesis mode\n");
+                 result = tts.synthesize(input, params);
+             }
+         }
++        fprintf(stderr, "[TTS] Synthesis completed\n");
+ 
+         if (!result.success) {
+             res.status = 500;
+@@ -903,9 +1255,12 @@ int main(int argc, char ** argv) {
+             return;
+         }
+ 
+-        fprintf(stderr, "synthesized %.2fs audio (%zu samples) in %lldms\n",
++        fprintf(stderr, "synthesized %.2fs audio (%zu samples) in %lldms (%.1f t/s, %.2f s/os)\n",
+                 (float)result.audio.size() / result.sample_rate,
+-                result.audio.size(), (long long)result.t_total_ms);
++                result.audio.size(), (long long)result.t_total_ms,
++                result.n_audio_tokens > 0 ? (double)result.n_audio_tokens * 1000.0 / (double)result.t_total_ms : 0.0,
++                result.sample_rate > 0 && (float)result.audio.size() / result.sample_rate > 0 ?
++                (float)result.t_total_ms / 1000.0 / ((float)result.audio.size() / result.sample_rate) : 0.0);
+ 
+         // one-shot (no stream_format): preserve legacy behavior
+         if (stream_format.empty()) {
+@@ -969,7 +1324,7 @@ int main(int argc, char ** argv) {
+         }
+     });
+ 
+-    fprintf(stderr, "server listening on %s:%d\n", sp.host.c_str(), sp.port);
++    fprintf(stderr, "[SERVER] Server listening on %s:%d\n", sp.host.c_str(), sp.port);
+     if (!svr.listen(sp.host, sp.port)) {
+         fprintf(stderr, "fatal: failed to bind to %s:%d\n", sp.host.c_str(), sp.port);
+         return 1;
