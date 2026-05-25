@@ -2,11 +2,16 @@
   lib,
   stdenv,
   fetchFromGitHub,
+
   cmake,
   pkg-config,
+  makeWrapper,
+
   openssl,
   httplib,
   nlohmann_json,
+
+  python3Packages,
 
   rocmPackages ? { },
   rocmGpuTargets ? rocmPackages.clr.localGpuTargets or rocmPackages.clr.gpuTargets,
@@ -41,6 +46,8 @@ stdenv.mkDerivation (finalAttrs: {
   nativeBuildInputs = [
     cmake
     pkg-config
+
+    makeWrapper
   ];
 
   buildInputs = rocmBuildInputs ++ [
@@ -54,6 +61,17 @@ stdenv.mkDerivation (finalAttrs: {
     (lib.cmakeFeature "CMAKE_HIP_COMPILER" "${rocmPackages.clr.hipClangPath}/clang++")
     (lib.cmakeFeature "CMAKE_HIP_ARCHITECTURES" (builtins.concatStringsSep ";" rocmGpuTargets))
   ];
+
+  postInstall =
+    let
+      path = lib.makeBinPath [
+        python3Packages.huggingface-hub
+      ];
+    in
+    ''
+      wrapProgram $out/bin/qwen3-tts-cli --prefix PATH : "${path}"
+      wrapProgram $out/bin/qwen3-tts-server --prefix PATH : "${path}"
+    '';
 
   meta = {
     description = "";
