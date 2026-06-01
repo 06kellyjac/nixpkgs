@@ -760,6 +760,7 @@
   ./services/home-automation/matterjs-server.nix
   ./services/home-automation/openthread-border-router.nix
   ./services/home-automation/wyoming/faster-whisper.nix
+  ./services/home-automation/wyoming/openai.nix
   ./services/home-automation/wyoming/openwakeword.nix
   ./services/home-automation/wyoming/piper.nix
   ./services/home-automation/wyoming/satellite.nix
