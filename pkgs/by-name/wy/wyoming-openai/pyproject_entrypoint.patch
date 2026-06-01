@@ -1,0 +1,27 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 5bc61ab..8c211e7 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -45,6 +45,9 @@ dev = [
+ where = ["src"]
+ include = ["wyoming_openai", "wyoming_openai.*"]
+ 
++[project.scripts]
++wyoming-openai = "wyoming_openai.__main__:cli"
++
+ [tool.pyright]
+ exclude = [
+     "**/node_modules",
+diff --git a/src/wyoming_openai/__main__.py b/src/wyoming_openai/__main__.py
+index 3b5d023..e8d90b3 100644
+--- a/src/wyoming_openai/__main__.py
++++ b/src/wyoming_openai/__main__.py
+@@ -394,5 +394,8 @@ async def main():
+         )
+ 
+ 
++def cli():
++    asyncio.run(main())
++
+ if __name__ == "__main__":
+     asyncio.run(main())
