@@ -51,6 +51,8 @@ let
     "media_image" = mkWorkflow "media_image" "media_image";
     "media_video" = mkWorkflow "media_video" "media_video";
     "media_other" = mkWorkflow "media_other" "media_other";
+    "media_assets_01" = mkWorkflow "media_assets_01" "media_assets_01";
+    "json" = mkWorkflow "json" "json";
   };
 in
 buildPythonPackage rec {
