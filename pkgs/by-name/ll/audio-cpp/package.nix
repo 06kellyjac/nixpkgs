@@ -15,6 +15,8 @@
   rocmPackages ? { },
   rocmGpuTargets ? rocmPackages.clr.localGpuTargets or rocmPackages.clr.gpuTargets,
 
+  rocmStrixHaloOptimizations ? false,
+
   cpuArchDynamicDispatch ? true,
 
   openclSupport ? false,
@@ -36,7 +38,6 @@
   pkg-config,
   metalSupport ? stdenv.hostPlatform.isDarwin && stdenv.hostPlatform.isAarch64 && !openclSupport,
   vulkanSupport ? false,
-  rpcSupport ? false,
   openssl,
   audio-cpp,
   shaderc,
@@ -81,14 +82,14 @@ let
 in
 effectiveStdenv.mkDerivation (finalAttrs: {
   pname = "audio-cpp";
-  version = "0.16-preview";
+  version = "0.7.0";
 
   src = fetchFromGitHub {
     owner = "0xShug0";
     repo = "audio.cpp";
     # tag = "release-${finalAttrs.version}";
-    rev = "03a75770ffb0df324b131762c169b3860e90259a";
-    hash = "sha256-b3jt+buz34YhlvAJ0nwINZFgQDRMvFvQ4UetbCOPMZo=";
+    rev = "aec444c6007fbd3b5f57074c60875eb4e54ef8f1"; # need the inbuilt model management
+    hash = "sha256-iU0VUyCEvwJCzIrigzdAfUiChCwFBTUUogM5S599cG8=";
     leaveDotGit = true;
     postFetch = ''
       git -C "$out" rev-parse --short HEAD > $out/COMMIT
@@ -96,7 +97,9 @@ effectiveStdenv.mkDerivation (finalAttrs: {
     '';
   };
 
-  patches = [ ];
+  patches = [
+    ./models-dir.patch
+  ];
 
   nativeBuildInputs = [
     cmake
@@ -124,14 +127,21 @@ effectiveStdenv.mkDerivation (finalAttrs: {
   '';
 
   cmakeFlags = [
+    (cmakeBool "AUDIOCPP_DEPLOYMENT_BUILD" true) # include model spec documents
     (cmakeBool "GGML_NATIVE" false) # -march=native would make builds non-deterministic
     # (cmakeBool "BUILD_SHARED_LIBS" true)
     (cmakeBool "ENGINE_BUILD_EXAMPLES" false)
     (cmakeBool "ENGINE_BUILD_TESTS" (finalAttrs.finalPackage.doCheck or false))
     (cmakeBool "ENGINE_BUILD_TESTS" false)
     (cmakeBool "ENGINE_ENABLE_CUDA" cudaSupport)
+    (cmakeBool "ENGINE_ENABLE_HIP" rocmSupport)
     (cmakeBool "ENGINE_ENABLE_METAL" metalSupport)
     (cmakeBool "ENGINE_VULKAN" vulkanSupport)
+    # opt-in to native model management to drop python requirement
+    # also required for de-vendoring boringssl
+    (cmakeBool "AUDIOCPP_BUILD_NATIVE_MODEL_MANAGER" true)
+    # de-vendor boringssl
+    (cmakeBool "AUDIOCPP_USE_SYSTEM_OPENSSL" true)
   ]
   ++ optionals cpuArchDynamicDispatch [
     # Build all CPU backend variants for runtime dynamic dispatch.
@@ -151,6 +161,9 @@ effectiveStdenv.mkDerivation (finalAttrs: {
   ++ optionals rocmSupport [
     (cmakeFeature "CMAKE_HIP_COMPILER" "${rocmPackages.clr.hipClangPath}/clang++")
     (cmakeFeature "CMAKE_HIP_ARCHITECTURES" (builtins.concatStringsSep ";" rocmGpuTargets))
+  ]
+  ++ optionals (rocmSupport && rocmStrixHaloOptimizations) [
+    (cmakeBool "ENGINE_HIP_STRIX_HALO_OPTIMIZATIONS" true)
   ]
   ++ optionals metalSupport [
     (cmakeFeature "CMAKE_C_FLAGS" "-D__ARM_FEATURE_DOTPROD=1")
@@ -181,8 +194,9 @@ effectiveStdenv.mkDerivation (finalAttrs: {
     description = "Inference of Meta's LLaMA model (and others) in pure C/C++";
     homepage = "https://github.com/ggml-org/llama.cpp";
     license = lib.licenses.mit;
-    mainProgram = "audio";
+    mainProgram = "audiocpp_cli";
     maintainers = with lib.maintainers; [
+      jk
     ];
     platforms = lib.platforms.unix;
     badPlatforms = optionals (cudaSupport || openclSupport) lib.platforms.darwin;

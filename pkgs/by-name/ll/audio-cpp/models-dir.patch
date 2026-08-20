@@ -1,0 +1,84 @@
+diff --git a/app/server/config.cpp b/app/server/config.cpp
+index 62ef3ae..4a2b09c 100644
+--- a/app/server/config.cpp
++++ b/app/server/config.cpp
+@@ -246,6 +246,12 @@ ServerConfig load_server_config(const std::filesystem::path & path) {
+         }
+         config.voice_dir = resolve_path(base, value->as_string());
+     }
++    if (const auto * value = root.find("models_dir")) {
++        if (!value->is_string()) {
++            throw std::runtime_error("server models_dir must be a string");
++        }
++        config.models_dir = resolve_path(base, value->as_string());
++    }
+     if (config.port <= 0 || config.port > 65535) {
+         throw std::runtime_error("server port must be in 1..65535");
+     }
+diff --git a/app/server/config.h b/app/server/config.h
+index 70c70b3..1d7ec98 100644
+--- a/app/server/config.h
++++ b/app/server/config.h
+@@ -91,6 +91,10 @@ struct ServerConfig {
+     // mapping file (<basename>|<transcript>). A request `voice` name that is not a
+     // model preset resolves to <voice_dir>/<name>.wav as the cloning reference.
+     std::optional<std::filesystem::path> voice_dir;
++    // Explicit models directory for ui_management. When set, the default models root
++    // uses this path instead of <binary_directory>/models. Accepts absolute or relative
++    // paths (relative resolved against request_base_).
++    std::optional<std::filesystem::path> models_dir;
+     std::vector<ServerModelConfig> models;
+ };
+ 
+diff --git a/app/server/main.cpp b/app/server/main.cpp
+index 61fb777..69e87a2 100644
+--- a/app/server/main.cpp
++++ b/app/server/main.cpp
+@@ -62,7 +62,7 @@ void print_help() {
+         << "audiocpp_server [--config <server.json>] [--ui] [--host <ip>] [--port <port>] [--backend <backend>]\n"
+         << "                [--device <id>] [--threads <n>] [--busy-timeout-ms <ms>]\n"
+         << "                [--model-spec-override <json-or-directory>] [--voice-dir <directory>]\n"
+-        << "                [--log] [--log-file <path>]\n"
++        << "                [--models-dir <directory>] [--log] [--log-file <path>]\n"
+         << "                [--cors-origins <origins>]\n"
+         << "  --ui                             serve the embedded WebUI\n"
+         << "  --no-ui                          disable the embedded WebUI\n"
+@@ -72,6 +72,7 @@ void print_help() {
+         << "  --busy-timeout-ms <ms>           fail a request with 503 when the model has been\n"
+         << "                                   busy this long; default 300000, 0 disables\n"
+         << "  --voice-dir <directory>          override the shared reference voice library directory\n"
++        << "  --models-dir <directory>          override the default models folder (default: <binary_dir>/models)\n"
+         << "  --cors-origins \"*\"              experimental; disabled by default. Allows browser\n"
+         << "                                   requests from any origin for trusted local demos only\n"
+         << "\n"
+@@ -181,6 +182,9 @@ int main(int argc, char ** argv) {
+         if (const auto voice_dir = arg_value(argc, argv, "--voice-dir")) {
+             config.voice_dir = std::filesystem::path(*voice_dir);
+         }
++        if (const auto models_dir = arg_value(argc, argv, "--models-dir")) {
++            config.models_dir = std::filesystem::path(*models_dir);
++        }
+         if (!(config.cors_origins == "*" || config.cors_origins == "")) {
+             throw std::runtime_error("--cors-origins must be '*' (allow all origins) or '' (disabled)");
+         }
+diff --git a/app/server/runtime.cpp b/app/server/runtime.cpp
+index ed5ccae..621a45b 100644
+--- a/app/server/runtime.cpp
++++ b/app/server/runtime.cpp
+@@ -935,7 +935,15 @@ ServerState::ServerState(
+         const auto binary_directory = ui_resource_anchor.empty()
+             ? request_base_
+             : std::filesystem::absolute(ui_resource_anchor).lexically_normal();
+-        default_models_root_ = (binary_directory / "models").lexically_normal();
++        if (config_.models_dir.has_value()) {
++            auto explicit_models = config_.models_dir.value();
++            if (explicit_models.is_relative()) {
++                explicit_models = std::filesystem::absolute(explicit_models);
++            }
++            default_models_root_ = explicit_models.lexically_normal();
++        } else {
++            default_models_root_ = (binary_directory / "models").lexically_normal();
++        }
+         models_root_ = default_models_root_;
+         request_base_ = binary_directory;
+         std::filesystem::create_directories(models_root_);
