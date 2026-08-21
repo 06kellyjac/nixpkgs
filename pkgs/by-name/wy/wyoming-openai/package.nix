@@ -30,6 +30,7 @@ python3Packages.buildPythonApplication (finalAttrs: {
 
   pythonRelaxDeps = [
     "openai"
+    "wyoming"
   ];
 
   dependencies = with python3Packages; [
