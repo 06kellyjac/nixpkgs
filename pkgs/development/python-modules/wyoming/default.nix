@@ -17,6 +17,7 @@
   wyoming-faster-whisper,
   wyoming-openwakeword,
   wyoming-piper,
+  wyoming-openai,
 }:
 
 buildPythonPackage rec {
@@ -51,7 +52,12 @@ buildPythonPackage rec {
   ++ lib.concatAttrValues optional-dependencies;
 
   passthru.tests = {
-    inherit wyoming-faster-whisper wyoming-openwakeword wyoming-piper;
+    inherit
+      wyoming-faster-whisper
+      wyoming-openwakeword
+      wyoming-piper
+      wyoming-openai
+      ;
   };
 
   meta = {
