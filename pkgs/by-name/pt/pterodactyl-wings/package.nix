@@ -21,7 +21,6 @@ buildGoModule (finalAttrs: {
 
   ldflags = [
     "-s"
-    "-w"
     "-X github.com/pterodactyl/wings/system.Version=${finalAttrs.version}"
   ];
 
@@ -30,7 +29,10 @@ buildGoModule (finalAttrs: {
     homepage = "https://pterodactyl.io";
     changelog = "https://github.com/pterodactyl/wings/releases/tag/v${finalAttrs.version}";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [ padowyt2 ];
+    maintainers = with lib.maintainers; [
+      padowyt2
+      jk
+    ];
     mainProgram = "wings";
     platforms = lib.platforms.linux;
   };
