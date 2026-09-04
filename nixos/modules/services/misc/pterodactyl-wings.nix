@@ -5,367 +5,481 @@
   ...
 }:
 let
+  inherit (lib) types mkOption;
+
   cfg = config.services.pterodactyl.wings;
 
-  mainConfig = {
-    debug = cfg.debug;
-    app_name = cfg.appName;
-    uuid = cfg.uuid;
-    token_id = if cfg.tokenIdFile != null then "@TOKEN_ID@" else cfg.tokenId;
-    token = if cfg.tokenFile != null then "@TOKEN@" else cfg.token;
-    api = {
-      host = cfg.api.host;
-      port = cfg.api.port;
-      ssl = {
-        enabled = cfg.api.ssl.enable;
-        cert = cfg.api.ssl.certFile;
-        key = cfg.api.ssl.keyFile;
-      };
-      upload_limit = cfg.api.uploadLimit;
-      trusted_proxies = cfg.api.trustedProxies;
-    };
-    system = {
-      root_directory = cfg.rootDir;
-      log_directory = cfg.logDir;
-      data = "${cfg.rootDir}/volumes";
-      archive_directory = "${cfg.rootDir}/archives";
-      backup_directory = "${cfg.rootDir}/backups";
-      tmp_directory = cfg.tmpDir;
-      username = cfg.user;
-      user = {
-        uid = config.users.users.${cfg.user}.uid;
-        gid = config.users.groups.${cfg.group}.gid;
-      };
-      sftp = {
-        bind_address = cfg.system.sftp.host;
-        bind_port = cfg.system.sftp.port;
-      };
-      docker = {
-        tmpfs_size = cfg.docker.tmpfsSize;
-        container_pid_limit = cfg.docker.containerPidLimit;
-        installer_limits = {
-          memory = cfg.docker.installerLimits.memory;
-          cpu = cfg.docker.installerLimits.cpu;
-        };
-      };
-      passwd.directory = "${cfg.runDir}/etc";
-      machine_id.directory = "${cfg.runDir}/machine-id";
-      use_openat2 = false;
-    };
-    remote = cfg.remote;
-    ignore_panel_config_updates = true;
-  };
-
-  setupScript = pkgs.writeShellApplication {
-    name = "pterodactyl-wings-setup";
-    runtimeInputs = with pkgs; [
-      coreutils
-      replace-secret
-    ];
-    text = ''
-      install -Dm640 -o ${cfg.user} -g ${cfg.group} ${
-        (pkgs.formats.yaml { }).generate "config.yml" (lib.recursiveUpdate mainConfig cfg.extraConfig)
-      } ${cfg.rootDir}/config.yml
-
-      ${lib.optionalString (cfg.tokenIdFile != null) ''
-        replace-secret '@TOKEN_ID@' ${lib.escapeShellArg cfg.tokenIdFile} ${cfg.rootDir}/config.yml
-      ''}
-
-      ${lib.optionalString (cfg.tokenFile != null) ''
-        replace-secret '@TOKEN@' ${lib.escapeShellArg cfg.tokenFile} ${cfg.rootDir}/config.yml
-      ''}
-    '';
-  };
-
-  cfgService = {
-    User = cfg.user;
-    Group = cfg.group;
-    StateDirectory = lib.removePrefix "/var/lib/" cfg.rootDir;
-    LogsDirectory = lib.removePrefix "/var/log/" cfg.logDir;
-    CacheDirectory = lib.removePrefix "/var/cache/" cfg.tmpDir;
-    RuntimeDirectory = lib.removePrefix "/run/" cfg.runDir;
-    ReadWritePaths = [
-      cfg.rootDir
-      cfg.logDir
-      cfg.tmpDir
-      cfg.runDir
-    ];
-  };
+  format = pkgs.formats.yaml { };
+  configFile = format.generate "pterodactyl-wings-config.yml" cfg.settings;
 in
 {
   options.services.pterodactyl.wings = {
     enable = lib.mkEnableOption "Pterodactyl Wings service";
 
-    package = lib.mkOption {
-      type = lib.types.package;
+    package = mkOption {
+      type = types.package;
       default = pkgs.pterodactyl-wings;
       defaultText = "pkgs.pterodactyl-wings";
       description = "Pterodactyl Wings package to use";
     };
 
-    user = lib.mkOption {
-      type = lib.types.str;
+    user = mkOption {
+      type = types.str;
       default = "pterodactyl-wings";
       description = "User to run Wings as";
     };
 
-    group = lib.mkOption {
-      type = lib.types.str;
+    group = mkOption {
+      type = types.str;
       default = "pterodactyl-wings";
       description = "Group to run Wings as";
     };
 
-    openFirewall = lib.mkOption {
-      type = lib.types.bool;
+    openFirewall = mkOption {
+      type = types.bool;
       default = false;
       description = "Whether to open the Wings API and SFTP ports in the firewall";
     };
 
-    containerRuntime = lib.mkOption {
-      type = lib.types.enum [ "docker" ];
+    containerRuntime = mkOption {
+      type = types.enum [ "docker" ];
       default = "docker";
       description = "The container runtime to use for Wings";
     };
 
-    rootDir = lib.mkOption {
-      type = lib.types.path;
+    rootDir = mkOption {
+      type = types.path;
       default = "/var/lib/pterodactyl-wings";
       description = "The root directory where all of Wings's data is stored";
     };
 
-    logDir = lib.mkOption {
-      type = lib.types.path;
+    logDir = mkOption {
+      type = types.path;
       default = "/var/log/pterodactyl-wings";
       description = "Directory where logs for Wings and server installations are stored";
     };
 
-    tmpDir = lib.mkOption {
-      type = lib.types.path;
+    tmpDir = mkOption {
+      type = types.path;
       default = "/var/cache/pterodactyl-wings";
       description = "Directory where temporary files for server installations are stored";
     };
 
-    runDir = lib.mkOption {
-      type = lib.types.path;
+    runDir = mkOption {
+      type = types.path;
       default = "/run/pterodactyl-wings";
       description = "Directory where runtime files are stored";
     };
 
-    debug = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = "Whether to run Wings in debug mode";
-    };
+    secrets = mkOption {
+      description = ''
+        It is recommended you keep your secrets separate from the configuration.
+        It's especially important to keep the raw secrets out of your nix
+        configuration, as the values will be preserved in your nix store.
+        This attribute allows you to configure the location of secret files to
+        be loaded at runtime.
 
-    appName = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "The name of the daemon";
-    };
-
-    uuid = lib.mkOption {
-      type = lib.types.str;
-      description = "A unique identifier for this node in the panel";
-    };
-
-    tokenId = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "An identifier for the token";
-    };
-
-    tokenIdFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = "Path to a file containing the token ID";
-    };
-
-    token = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "The token for communicating with the panel";
-    };
-
-    tokenFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = "Path to a file containing the token";
-    };
-
-    remote = lib.mkOption {
-      type = lib.types.str;
-      description = "The URL of the panel to connect to";
-    };
-
-    api = {
-      host = lib.mkOption {
-        type = lib.types.str;
-        default = "0.0.0.0";
-        description = "The interface that Wings should bind to";
-      };
-
-      port = lib.mkOption {
-        type = lib.types.port;
-        default = 8080;
-        description = "The port that Wings should bind to";
-      };
-
-      ssl = {
-        enable = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-          description = "Whether to enable SSL for the API";
-        };
-
-        certFile = lib.mkOption {
-          type = lib.types.nullOr lib.types.path;
-          default = null;
-          description = "Path to the SSL certificate file";
-        };
-
-        keyFile = lib.mkOption {
-          type = lib.types.nullOr lib.types.path;
-          default = null;
-          description = "Path to the SSL key file";
-        };
-      };
-
-      uploadLimit = lib.mkOption {
-        type = lib.types.int;
-        default = 100;
-        description = "The maximum size for files uploaded through the panel in MB";
-      };
-
-      trustedProxies = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
-        description = "A list of trusted proxy IP addresses";
-      };
-    };
-
-    system.sftp = {
-      host = lib.mkOption {
-        type = lib.types.str;
-        default = "0.0.0.0";
-        description = "The interface that Wings's SFTP should bind to";
-      };
-
-      port = lib.mkOption {
-        type = lib.types.port;
-        default = 2022;
-        description = "The port that Wings's SFTP should bind to";
-      };
-    };
-
-    docker = {
-      tmpfsSize = lib.mkOption {
-        type = lib.types.int;
-        default = 100;
-        description = "The size of the temporary directory in MB for the container";
-      };
-
-      containerPidLimit = lib.mkOption {
-        type = lib.types.int;
-        default = 512;
-        description = "Total number of processes that can be active in a container";
-      };
-
-      installerLimits = {
-        memory = lib.mkOption {
-          type = lib.types.int;
-          default = 1024;
-          description = "The maximum amount of RAM the installation process can use";
-        };
-
-        cpu = lib.mkOption {
-          type = lib.types.int;
-          default = 100;
-          description = "The maximum amount of CPU the installation process can use";
-        };
-      };
-    };
-
-    extraConfig = lib.mkOption {
-      type = lib.types.attrsOf lib.types.anything;
+        If you need to set additional secret values in the pterodactyl-wings
+        config you should leverage "file://''${filePath}"
+      '';
       default = { };
-      description = "Extra configuration to be merged with the main configuration";
+      type = types.submodule {
+        options = {
+          manual = mkOption {
+            default = false;
+            example = true;
+            description = ''
+              Configuring pterodactyl-wings' secret files via the secrets
+              attribute set is intended to be convenient and help catch cases
+              where values are required to run at all.
+              If a user wants to set these values themselves and bypass the
+              validation they can set this value to true.
+            '';
+            type = types.bool;
+          };
+
+          # required
+          tokenIDFile = mkOption {
+            type = types.nullOr types.externalPath;
+            default = null;
+            description = ''
+              Path to your Token ID secret used for X.
+            '';
+          };
+
+          # required
+          tokenFile = mkOption {
+            type = types.nullOr types.externalPath;
+            default = null;
+            description = ''
+              Path to your Token secret used for X.
+            '';
+          };
+
+          sslCertFile = mkOption {
+            type = types.nullOr types.externalPath;
+            default = null;
+            description = ''
+              Path to your SSL Cert secret used for X.
+            '';
+          };
+
+          sslKeyFile = mkOption {
+            type = types.nullOr types.externalPath;
+            default = null;
+            description = ''
+              Path to your SSL Key secret used for X.
+            '';
+          };
+        };
+      };
     };
 
-    extraConfigFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = "Extra configuration file to be merged with the other configuration";
+    settings = mkOption {
+      description = ''
+        Your Pterodactyl Wings config.yml as a Nix attribute set.
+        There are several values that are defined and documented in nix such as `check_permissions_on_boot`,
+        but additional items can also be included.
+
+        <https://pterodactyl.io/wings/1.0/configuration.html>
+
+        Some values are undocumented <https://github.com/pterodactyl/wings/blob/develop/config/config.go>
+      '';
+      default = { };
+      example = ''
+        {
+          app_name = "nixos_pterodactyl";
+          installer_limits = {
+            memory = 1024;
+            cpu = 100;
+          };
+        }
+      '';
+      type = types.submodule {
+        freeformType = format.type;
+        options = {
+          # TODO: consider a genUuid option, could set value with file://<file_name>
+          # without needing to replace values in the config file
+          uuid = lib.mkOption {
+            type = with lib.types; nullOr str;
+            # pre-defined uuid of Dns in RFC 4122
+            example = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+            default = null;
+            description = ''
+              Must be set to a unique identifier, preferably a UUID according to
+              RFC 4122. UUIDs can be generated with `uuidgen` command, found in
+              the `util-linux` package.
+            '';
+          };
+
+          ignore_panel_config_updates = mkOption {
+            type = types.nullOr types.bool;
+            default = true;
+            example = true;
+            description = ''
+              Causes confiuration updates that are sent by the Pterodactyl Panel to be ignored.
+              Important for our declarative config via nix.
+            '';
+            # TODO: check if having this off causes any problems at runtime, maybe force
+          };
+
+          token_id = mkOption {
+            type = types.str;
+            default = null;
+            example = "/var/log/authelia/authelia.log";
+            description = "File path where the logs will be written. If not set logs are written to stdout.";
+          };
+
+          token = mkOption {
+            type = types.str;
+            default = null;
+            example = "/var/log/authelia/authelia.log";
+            description = "File path where the logs will be written. If not set logs are written to stdout.";
+          };
+
+          remote = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            example = "TODO";
+            description = "The URL of the panel to connect to.";
+          };
+
+          debug = mkOption {
+            type = types.nullOr types.bool;
+            default = null;
+            example = true;
+            description = "Force Wings to run in debug mode.";
+          };
+
+          check_permissions_on_boot = mkOption {
+            type = types.nullOr types.bool;
+            default = null;
+            example = true;
+            description = ''
+              Check all file permissions on each boot.
+              Disable this when you have a very large amount of files and the
+              server startup is hanging on checking permissions.
+            '';
+          };
+
+          api = {
+            host = mkOption {
+              type = types.str;
+              default = "localhost";
+              example = "0.0.0.0";
+              description = "The address to listen on.";
+            };
+            port = lib.mkOption {
+              type = lib.types.port;
+              default = 8080;
+              example = 11343;
+              description = "Port that pterodactyl wings listens on.";
+            };
+          };
+
+          system = {
+            # TODO: force these values?
+            root_directory = mkOption {
+              type = types.nullOr types.externalPath;
+              default = null;
+              example = "/var/log/authelia/authelia.log";
+              description = "File path where the logs will be written. If not set logs are written to stdout.";
+            };
+
+            log_directory = mkOption {
+              type = types.nullOr types.externalPath;
+              default = null;
+              example = "/var/log/authelia/authelia.log";
+              description = "File path where the logs will be written. If not set logs are written to stdout.";
+            };
+
+            data = mkOption {
+              type = types.nullOr types.externalPath;
+              default = null;
+              example = "/var/log/authelia/authelia.log";
+              description = "File path where the logs will be written. If not set logs are written to stdout.";
+            };
+
+            archive_directory = mkOption {
+              type = types.nullOr types.externalPath;
+              default = null;
+              example = "/var/log/authelia/authelia.log";
+              description = "File path where the logs will be written. If not set logs are written to stdout.";
+            };
+
+            backup_directory = mkOption {
+              type = types.nullOr types.externalPath;
+              default = null;
+              example = "/var/log/authelia/authelia.log";
+              description = "File path where the logs will be written. If not set logs are written to stdout.";
+            };
+
+            tmp_directory = mkOption {
+              type = types.nullOr types.externalPath;
+              default = null;
+              example = "/var/log/authelia/authelia.log";
+              description = "File path where the logs will be written. If not set logs are written to stdout.";
+            };
+
+            username = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              example = "pterodactyl-wing";
+              description = "File path where the logs will be written. If not set logs are written to stdout.";
+            };
+
+            user = {
+              uid = mkOption {
+                type = types.nullOr types.ints.unsigned;
+                default = null;
+                example = 5432;
+                description = "File path where the logs will be written. If not set logs are written to stdout.";
+              };
+              gid = mkOption {
+                type = types.nullOr types.ints.unsigned;
+                default = null;
+                example = 5432;
+                description = "File path where the logs will be written. If not set logs are written to stdout.";
+              };
+            };
+
+            sftp = {
+              bind_address = mkOption {
+                type = types.str;
+                default = "localhost";
+                example = "0.0.0.0";
+                description = "The address to listen on.";
+              };
+              bind_port = lib.mkOption {
+                type = lib.types.port;
+                default = 2022;
+                example = 11344;
+                description = ''
+                  Port that llama-swap listens on.
+                '';
+              };
+            };
+          };
+        };
+      };
     };
   };
 
   config = lib.mkIf cfg.enable {
     assertions = [
       {
-        assertion = cfg.uuid != "";
+        assertion = cfg.settings.uuid != null;
         message = "services.pterodactyl.wings.uuid must be set";
       }
       {
-        assertion = cfg.remote != "";
-        message = "services.pterodactyl.wings.remote must be set";
+        assertion =
+          # both set
+          (cfg.secrets.sslCertFile != null && cfg.secrets.sslKeyFile != null)
+          # or both unset
+          || (cfg.secrets.sslCertFile == null && cfg.secrets.sslKeyFile == null);
+        message = "both services.pterodactyl.wings.secrets.sslCertFile and services.pterodactyl.wings.secrets.sslKeyFile must be set or neither";
       }
       {
-        assertion = cfg.tokenId == null || cfg.tokenIdFile == null;
-        message = "cannot set both services.pterodactyl.wings.tokenId and services.pterodactyl.wings.tokenIdFile";
-      }
-      {
-        assertion = cfg.tokenId != null || cfg.tokenIdFile != null;
-        message = "must set either services.pterodactyl.wings.tokenId or services.pterodactyl.wings.tokenIdFile";
-      }
-      {
-        assertion = cfg.token == null || cfg.tokenFile == null;
-        message = "cannot set both services.pterodactyl.wings.token and services.pterodactyl.wings.tokenFile";
-      }
-      {
-        assertion = cfg.token != null || cfg.tokenFile != null;
-        message = "must set either services.pterodactyl.wings.token or services.pterodactyl.wings.tokenFile";
+        assertion =
+          cfg.secrets.manual || (cfg.secrets.tokenIDFile != null && cfg.secrets.tokenFile != null);
+        message = ''
+          Pterodactyl Wings requires a Token ID and Token to work.
+          Either set them like so:
+          services.pterodactyl.wings.secrets.tokenIDFile = "/my/path/to/token_id_file";
+          services.pterodactyl.wings.secrets.tokenFile = "/my/path/to/token_file";
+
+          Or set services.pterodactyl.wings.secrets.manual = true; and provide
+          them yourself in the settings for a key via `$ENV_VAR` or `file://<filename>` directives.
+          https://github.com/pterodactyl/wings/blob/d6116827313dae176ddf4741e233554392993398/config/config.go#L414-L422
+          Do not include raw secrets in nix settings.
+        '';
       }
     ];
+
+    services.pterodactyl.wings.settings = {
+      remote =
+        let
+          panelCfg = config.settings.pterodactyl.panel;
+        in
+        lib.mkIf panelCfg.enable lib.mkDefault panelCfg.app.url;
+
+      token_id = "file://${cfg.secrets.tokenIDFile}";
+      token = "file://${cfg.secrets.tokenFile}";
+      api.ssl = {
+        enabled = lib.mkIf (
+          cfg.secrets.sslCertFile != null || cfg.secrets.sslKeyFile != null
+        ) lib.mkDefault true;
+        cert = lib.mkIf (cfg.secrets.sslCertFile != null) "file://${cfg.secrets.sslCertFile}";
+        key = lib.mkIf (cfg.secrets.sslKeyFile != null) "file://${cfg.secrets.sslKeyFile}";
+      };
+
+      system = {
+        root_directory = cfg.rootDir;
+        log_directory = cfg.logDir;
+        data = "${cfg.rootDir}/volumes";
+        archive_directory = "${cfg.rootDir}/archives";
+        backup_directory = "${cfg.rootDir}/backups";
+        tmp_directory = cfg.tmpDir;
+        username = cfg.user;
+        user = {
+          uid = config.users.users.${cfg.user}.uid;
+          gid = config.users.groups.${cfg.group}.gid;
+        };
+        passwd.directory = "${cfg.runDir}/etc";
+        machine_id.directory = "${cfg.runDir}/machine-id";
+      };
+    };
 
     virtualisation.docker.enable = lib.mkIf (cfg.containerRuntime == "docker") true;
 
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [
-      cfg.api.port
-      cfg.system.sftp.port
+      cfg.settings.api.port
+      cfg.settings.system.sftp.bind_port
     ];
-
-    systemd.services.pterodactyl-wings-setup = {
-      description = "Pterodactyl Wings setup";
-      before = [ "pterodactyl-wings.service" ];
-      requiredBy = [ "pterodactyl-wings.service" ];
-
-      serviceConfig = cfgService // {
-        Type = "oneshot";
-        ExecStart = lib.getExe setupScript;
-        RemainAfterExit = true;
-      };
-    };
 
     systemd.services.pterodactyl-wings = {
       description = "Pterodactyl Wings service";
       after = [
         "network-online.target"
-        "docker.service"
-        "pterodactyl-wings-setup.service"
-      ];
+      ]
+      ++ lib.optional (cfg.containerRuntime == "docker") "docker.service";
       wants = [ "network-online.target" ];
-      requires = [
-        "docker.service"
-        "pterodactyl-wings-setup.service"
-      ];
-      partOf = [ "docker.service" ];
+      requires = lib.optional (cfg.containerRuntime == "docker") "docker.service";
       wantedBy = [ "multi-user.target" ];
 
-      serviceConfig = cfgService // {
-        ExecStart = "${lib.getExe cfg.package} --config ${cfg.rootDir}/config.yml";
-        Restart = "on-failure";
-        AmbientCapabilities = "CAP_CHOWN";
-        EnvironmentFile = lib.optional (cfg.extraConfigFile != null) cfg.extraConfigFile;
-      };
+      serviceConfig =
+        let
+          nonNullSecretsMap = lib.filterAttrs (
+            k: v:
+            # strip out the manual override
+            k != "manual"
+            # and strip unset secrets
+            && v != null
+          ) cfg.secrets;
+        in
+        {
+          User = cfg.user;
+          Group = cfg.group;
+          ExecStart = "${lib.getExe cfg.package} --config ${configFile}";
+          Restart = "always";
+          RestartSec = "5s";
+          StateDirectory = lib.removePrefix "/var/lib/" cfg.rootDir;
+          LogsDirectory = lib.removePrefix "/var/log/" cfg.logDir;
+          CacheDirectory = lib.removePrefix "/var/cache/" cfg.tmpDir;
+          RuntimeDirectory = lib.removePrefix "/run/" cfg.runDir;
+          ReadWritePaths = [
+            cfg.rootDir
+            cfg.logDir
+            cfg.tmpDir
+            cfg.runDir
+          ];
+
+          LoadCredential = lib.mapAttrsToList (k: v: "${k}:${v}") nonNullSecretsMap;
+
+          # Security options:
+          AmbientCapabilities = "CAP_CHOWN";
+          CapabilityBoundingSet = "";
+          DeviceAllow = "";
+          LockPersonality = true;
+          MemoryDenyWriteExecute = true;
+          NoNewPrivileges = true;
+
+          PrivateTmp = true;
+          PrivateDevices = true;
+          PrivateUsers = true;
+
+          ProtectClock = true;
+          ProtectControlGroups = true;
+          ProtectHome = "read-only";
+          ProtectHostname = true;
+          ProtectKernelLogs = true;
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectProc = "noaccess";
+          ProtectSystem = "strict";
+
+          RestrictAddressFamilies = [
+            "AF_INET"
+            "AF_INET6"
+            "AF_UNIX"
+          ];
+          RestrictNamespaces = true;
+          RestrictRealtime = true;
+          RestrictSUIDSGID = true;
+
+          SystemCallArchitectures = "native";
+          SystemCallErrorNumber = "EPERM";
+          SystemCallFilter = [
+            "@system-service"
+            "~@cpu-emulation"
+            "~@debug"
+            "~@keyring"
+            "~@memlock"
+            "~@obsolete"
+            "~@privileged"
+            "~@setuid"
+          ];
+        };
     };
 
     users.users = lib.mkIf (cfg.user == "pterodactyl-wings") {
@@ -373,7 +487,7 @@ in
         isSystemUser = true;
         group = cfg.group;
         home = cfg.rootDir;
-        extraGroups = [ "docker" ];
+        extraGroups = lib.optional (cfg.containerRuntime == "docker") "docker";
       };
     };
 
