@@ -73,7 +73,10 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     homepage = "https://pterodactyl.io";
     changelog = "https://github.com/pterodactyl/panel/releases/tag/v${finalAttrs.version}";
     license = lib.licenses.mit;
-    maintainers = with lib.maintainers; [ padowyt2 ];
+    maintainers = with lib.maintainers; [
+      padowyt2
+      jk
+    ];
     platforms = lib.platforms.all;
   };
 })
