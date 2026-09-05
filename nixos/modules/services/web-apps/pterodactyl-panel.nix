@@ -18,7 +18,7 @@ let
       APP_ENVIRONMENT_ONLY = cfg.app.environmentOnly;
 
       DB_CONNECTION = "mysql";
-      DB_HOST = if cfg.database.createLocally then "localhost" else cfg.database.host;
+      DB_HOST = if cfg.database.createLocally then "127.0.0.1" else cfg.database.host;
       DB_PORT = cfg.database.port;
       DB_DATABASE = cfg.database.name;
       DB_USERNAME = cfg.database.user;
@@ -500,7 +500,7 @@ in
 
     telemetry.enable = lib.mkOption {
       type = lib.types.bool;
-      default = true;
+      default = false;
       description = "Whether to enable telemetry";
     };
 

@@ -359,16 +359,16 @@ in
     services.pterodactyl.wings.settings = {
       remote =
         let
-          panelCfg = config.settings.pterodactyl.panel;
+          panelCfg = config.services.pterodactyl.panel;
         in
-        lib.mkIf panelCfg.enable lib.mkDefault panelCfg.app.url;
+        lib.mkIf panelCfg.enable (lib.mkDefault panelCfg.app.url);
 
       token_id = "file://${cfg.secrets.tokenIDFile}";
       token = "file://${cfg.secrets.tokenFile}";
       api.ssl = {
-        enabled = lib.mkIf (
-          cfg.secrets.sslCertFile != null || cfg.secrets.sslKeyFile != null
-        ) lib.mkDefault true;
+        enabled = lib.mkIf (cfg.secrets.sslCertFile != null || cfg.secrets.sslKeyFile != null) (
+          lib.mkDefault true
+        );
         cert = lib.mkIf (cfg.secrets.sslCertFile != null) "file://${cfg.secrets.sslCertFile}";
         key = lib.mkIf (cfg.secrets.sslKeyFile != null) "file://${cfg.secrets.sslKeyFile}";
       };
@@ -438,47 +438,47 @@ in
 
           # Security options:
           AmbientCapabilities = "CAP_CHOWN";
-          CapabilityBoundingSet = "";
-          DeviceAllow = "";
-          LockPersonality = true;
-          MemoryDenyWriteExecute = true;
-          NoNewPrivileges = true;
+          # CapabilityBoundingSet = "";
+          # DeviceAllow = "";
+          # LockPersonality = true;
+          # MemoryDenyWriteExecute = true;
+          # NoNewPrivileges = true;
 
-          PrivateTmp = true;
-          PrivateDevices = true;
-          PrivateUsers = true;
+          # PrivateTmp = true;
+          # PrivateDevices = true;
+          # PrivateUsers = true;
 
-          ProtectClock = true;
-          ProtectControlGroups = true;
-          ProtectHome = "read-only";
-          ProtectHostname = true;
-          ProtectKernelLogs = true;
-          ProtectKernelModules = true;
-          ProtectKernelTunables = true;
-          ProtectProc = "noaccess";
-          ProtectSystem = "strict";
+          # ProtectClock = true;
+          # ProtectControlGroups = true;
+          # ProtectHome = "read-only";
+          # ProtectHostname = true;
+          # ProtectKernelLogs = true;
+          # ProtectKernelModules = true;
+          # ProtectKernelTunables = true;
+          # ProtectProc = "noaccess";
+          # ProtectSystem = "strict";
 
-          RestrictAddressFamilies = [
-            "AF_INET"
-            "AF_INET6"
-            "AF_UNIX"
-          ];
-          RestrictNamespaces = true;
-          RestrictRealtime = true;
-          RestrictSUIDSGID = true;
+          # RestrictAddressFamilies = [
+          #   "AF_INET"
+          #   "AF_INET6"
+          #   "AF_UNIX"
+          # ];
+          # RestrictNamespaces = true;
+          # RestrictRealtime = true;
+          # RestrictSUIDSGID = true;
 
-          SystemCallArchitectures = "native";
-          SystemCallErrorNumber = "EPERM";
-          SystemCallFilter = [
-            "@system-service"
-            "~@cpu-emulation"
-            "~@debug"
-            "~@keyring"
-            "~@memlock"
-            "~@obsolete"
-            "~@privileged"
-            "~@setuid"
-          ];
+          # SystemCallArchitectures = "native";
+          # SystemCallErrorNumber = "EPERM";
+          # SystemCallFilter = [
+          #   "@system-service"
+          #   "~@cpu-emulation"
+          #   "~@debug"
+          #   "~@keyring"
+          #   "~@memlock"
+          #   "~@obsolete"
+          #   "~@privileged"
+          #   "~@setuid"
+          # ];
         };
     };
 
